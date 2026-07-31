@@ -1,0 +1,50 @@
+{
+  "name": "@fullstack-ai-infra/digital-employee",
+  "version": "0.1.0",
+  "description": "A self-hosted runtime for role-based digital employees.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/fullstack-ai-infra/digital-employee#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fullstack-ai-infra/digital-employee.git"
+  },
+  "bugs": {
+    "url": "https://github.com/fullstack-ai-infra/digital-employee/issues"
+  },
+  "bin": {
+    "digital-employee": "./apps/cli/bin.js"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "files": [
+    "apps",
+    "packages",
+    "connectors",
+    "profiles",
+    "configs",
+    "examples",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "ask": "node ./apps/cli/bin.js ask",
+    "demo": "node ./apps/cli/bin.js ask --config ./configs/demo.json",
+    "serve": "node ./apps/cli/bin.js serve",
+    "start": "node ./apps/cli/bin.js start",
+    "sync": "node ./apps/cli/bin.js sync",
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage",
+    "security:check": "node ./scripts/security-check.js",
+    "check": "npm test && npm run security:check"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "optionalDependencies": {
+    "dingtalk-stream": "2.1.5"
+  }
+}
