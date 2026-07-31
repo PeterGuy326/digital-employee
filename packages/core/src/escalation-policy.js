@@ -11,8 +11,8 @@ export class EscalationPolicy {
 
   constructor(options = {}) {
     this.#minConfidence = options.minConfidence ?? 0.55
-    this.#minEvidence = options.minEvidence ?? 0
-    this.#minCitations = options.minCitations ?? 0
+    this.#minEvidence = options.minEvidence ?? 1
+    this.#minCitations = options.minCitations ?? 1
     this.#escalateOnError = options.escalateOnError ?? true
     this.#target = options.target ?? "human-support"
     this.#message =

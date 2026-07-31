@@ -6,6 +6,8 @@ const DEFAULTS = {
   queueTimeoutMs: 30_000,
   cooldownMs: 0,
   dedupeWindowMs: 5 * 60_000,
+  maxSeenJobs: 1_000,
+  maxTrackedActors: 1_000,
 }
 
 function positiveInteger(value, name, { allowZero = false } = {}) {
@@ -24,6 +26,8 @@ export class JobRunner {
   #queueTimeoutMs
   #cooldownMs
   #dedupeWindowMs
+  #maxSeenJobs
+  #maxTrackedActors
   #clock
   #setTimer
   #clearTimer
@@ -58,6 +62,14 @@ export class JobRunner {
       options.dedupeWindowMs ?? DEFAULTS.dedupeWindowMs,
       "dedupeWindowMs",
       { allowZero: true },
+    )
+    this.#maxSeenJobs = positiveInteger(
+      options.maxSeenJobs ?? DEFAULTS.maxSeenJobs,
+      "maxSeenJobs",
+    )
+    this.#maxTrackedActors = positiveInteger(
+      options.maxTrackedActors ?? DEFAULTS.maxTrackedActors,
+      "maxTrackedActors",
     )
     this.#clock = options.clock ?? (() => Date.now())
     this.#setTimer = options.setTimer ?? setTimeout
@@ -214,7 +226,14 @@ export class JobRunner {
   async #start(identity, task) {
     this.#running += 1
     this.#runningActors.add(identity.actorId)
-    this.#lastStartedByActor.set(identity.actorId, this.#clock())
+    if (this.#cooldownMs > 0) {
+      this.#setBounded(
+        this.#lastStartedByActor,
+        identity.actorId,
+        this.#clock(),
+        this.#maxTrackedActors,
+      )
+    }
     try {
       return await task()
     } finally {
@@ -256,7 +275,20 @@ export class JobRunner {
 
   #recordJob(jobId) {
     if (jobId && this.#dedupeWindowMs > 0) {
-      this.#seenJobs.set(jobId, this.#clock())
+      this.#setBounded(
+        this.#seenJobs,
+        jobId,
+        this.#clock(),
+        this.#maxSeenJobs,
+      )
+    }
+  }
+
+  #setBounded(map, key, value, maximum) {
+    map.delete(key)
+    map.set(key, value)
+    while (map.size > maximum) {
+      map.delete(map.keys().next().value)
     }
   }
 }

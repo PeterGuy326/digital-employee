@@ -149,7 +149,8 @@ Install and learn more in the
   addresses unless `allowPrivateNetwork` is explicitly enabled.
 - DingTalk session webhooks accept exact official HTTPS hosts only.
 - Session memory has TTL and capacity limits.
-- FAQ memory learns only from explicitly verified feedback.
+- FAQ memory is fail-closed: it learns only from answered exchanges after an
+  injected trusted reviewer authorizes explicitly verified feedback.
 - Structured errors redact credential-like fields and never expose stacks.
 
 Read [SECURITY.md](SECURITY.md) and
@@ -166,7 +167,7 @@ container, live DWS, and not-yet-live-tested evidence.
 | Console and HTTP entry points | Shipped |
 | DingTalk Stream channel | Shipped; live credentials required for integration verification |
 | Filesystem, Git, and DWS sources | Shipped |
-| Human escalation and verified FAQ feedback | Shipped |
+| Human escalation and authorized verified FAQ feedback | Shipped |
 | Project-assistant and operations profiles | Planned |
 | Write tools and approval workflow | Planned; disabled in the first release |
 | Hosted multi-tenant service | Not a goal for `0.1` |

@@ -10,6 +10,13 @@ import {
   VerifiedFaqStore,
 } from "../../packages/core/index.js"
 
+function createPermissiveEscalationPolicy() {
+  return new EscalationPolicy({
+    minEvidence: 0,
+    minCitations: 0,
+  })
+}
+
 test("DigitalEmployee answers with traceable citations and the public model contract", async () => {
   let modelInput
   const retriever = new LexicalRetriever([
@@ -180,6 +187,7 @@ test("DigitalEmployee exposes JobRunner cooldown as a structured rejection", asy
   let now = 5_000
   const employee = new DigitalEmployee({
     model: async () => ({ answer: "Done.", confidence: 1 }),
+    escalationPolicy: createPermissiveEscalationPolicy(),
     jobRunner: new JobRunner({
       cooldownMs: 1_000,
       clock: () => now,
@@ -207,6 +215,7 @@ test("DigitalEmployee is read-only by default and does not execute write tools",
   let writeExecuted = false
   let calls = 0
   const employee = new DigitalEmployee({
+    escalationPolicy: createPermissiveEscalationPolicy(),
     tools: [
       {
         name: "update-record",
@@ -251,10 +260,44 @@ test("DigitalEmployee is read-only by default and does not execute write tools",
   assert.equal(writeExecuted, false)
 })
 
-test("DigitalEmployee stores FAQ memory only after verified feedback", async () => {
+test("DigitalEmployee denies verified FAQ learning without an authorizer", async () => {
   const faqStore = new VerifiedFaqStore()
   const employee = new DigitalEmployee({
     faqStore,
+    escalationPolicy: createPermissiveEscalationPolicy(),
+    model: async () => ({
+      answer: "The handbook is in the shared repository.",
+      confidence: 0.9,
+    }),
+  })
+  await employee.answer({
+    requestId: "request-feedback-default-deny",
+    actorId: "user-feedback",
+    sessionId: "session-feedback-default-deny",
+    message: "Where is the handbook?",
+  })
+
+  assert.deepEqual(
+    employee.recordFeedback({
+      sessionId: "session-feedback-default-deny",
+      verified: true,
+    }),
+    { stored: false, reason: "feedback_not_authorized" },
+  )
+  assert.equal(faqStore.stats().count, 0)
+})
+
+test("DigitalEmployee stores FAQ memory only after authorized verified feedback", async () => {
+  const faqStore = new VerifiedFaqStore()
+  const reviewerCapability = Object.freeze({ type: "faq-reviewer" })
+  let authorizationInput
+  const employee = new DigitalEmployee({
+    faqStore,
+    escalationPolicy: createPermissiveEscalationPolicy(),
+    authorizeFeedback(input) {
+      authorizationInput = input
+      return input.authorization === reviewerCapability
+    },
     model: async () => ({
       answer: "The handbook is in the shared repository.",
       confidence: 0.9,
@@ -276,11 +319,117 @@ test("DigitalEmployee stores FAQ memory only after verified feedback", async () 
   )
   assert.equal(faqStore.stats().count, 0)
 
-  const verified = employee.recordFeedback({
-    sessionId: "session-feedback",
-    verified: true,
-    note: "The requester confirmed the answer.",
-  })
+  assert.deepEqual(
+    employee.recordFeedback({
+      sessionId: "session-feedback",
+      verified: true,
+      note: "The requester confirmed the answer.",
+      authorization: reviewerCapability,
+    }),
+    { stored: false, reason: "feedback_not_authorized" },
+  )
+  assert.equal(faqStore.stats().count, 0)
+
+  const verified = employee.recordFeedback(
+    {
+      sessionId: "session-feedback",
+      verified: true,
+      note: "The reviewer confirmed the answer.",
+    },
+    reviewerCapability,
+  )
   assert.equal(verified.stored, true)
   assert.equal(faqStore.stats().count, 1)
+  assert.equal(authorizationInput.authorization, reviewerCapability)
+  assert.equal(authorizationInput.requestId, "request-feedback")
+  assert.equal(authorizationInput.exchange.question, "Where is the handbook?")
+  assert.equal(
+    authorizationInput.exchange.answer,
+    "The handbook is in the shared repository.",
+  )
+})
+
+test("DigitalEmployee never promotes an escalated response to verified FAQ memory", async () => {
+  const faqStore = new VerifiedFaqStore()
+  let authorizationCalls = 0
+  const employee = new DigitalEmployee({
+    faqStore,
+    authorizeFeedback() {
+      authorizationCalls += 1
+      return true
+    },
+    model: async () => ({
+      answer: "This answer has no approved evidence.",
+      confidence: 0.99,
+    }),
+  })
+  const result = await employee.answer({
+    requestId: "request-feedback-escalated",
+    actorId: "user-feedback",
+    sessionId: "session-feedback-escalated",
+    message: "What is the undocumented exception?",
+  })
+
+  assert.equal(result.status, "escalated")
+  assert.deepEqual(
+    employee.recordFeedback(
+      {
+        sessionId: "session-feedback-escalated",
+        verified: true,
+      },
+      { reviewer: "trusted" },
+    ),
+    { stored: false, reason: "exchange_not_answered" },
+  )
+  assert.equal(authorizationCalls, 0)
+  assert.equal(faqStore.stats().count, 0)
+})
+
+test("DigitalEmployee never promotes a stale answer after a failed request", async () => {
+  const faqStore = new VerifiedFaqStore()
+  let shouldFail = false
+  const employee = new DigitalEmployee({
+    faqStore,
+    authorizeFeedback: () => true,
+    escalationPolicy: {
+      evaluate: () => ({ required: false }),
+    },
+    model: async () => {
+      if (shouldFail) {
+        throw new CoreError("PROVIDER_ERROR", "Provider unavailable")
+      }
+      return {
+        answer: "The handbook is in the shared repository.",
+        confidence: 0.9,
+      }
+    },
+  })
+  const answered = await employee.answer({
+    requestId: "request-feedback-before-failure",
+    actorId: "user-feedback",
+    sessionId: "session-feedback-failed",
+    message: "Where is the handbook?",
+  })
+  assert.equal(answered.status, "answered")
+
+  shouldFail = true
+  const failed = await employee.answer({
+    requestId: "request-feedback-failed",
+    actorId: "user-feedback",
+    sessionId: "session-feedback-failed",
+    message: "What changed today?",
+  })
+  assert.equal(failed.status, "failed")
+
+  assert.deepEqual(
+    employee.recordFeedback(
+      {
+        sessionId: "session-feedback-failed",
+        verified: true,
+      },
+      { reviewer: "trusted" },
+    ),
+    { stored: false, reason: "exchange_not_answered" },
+  )
+  assert.equal(faqStore.stats().count, 0)
 })

@@ -5,8 +5,37 @@ import { spawnSync } from "node:child_process";
 
 const BLOCKED = [
   { name: "private key", pattern: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/ },
-  { name: "GitHub token", pattern: /\bgh[opusr]_[A-Za-z0-9]{20,}\b/ },
-  { name: "AWS access key", pattern: /\bAKIA[0-9A-Z]{16}\b/ },
+  {
+    name: "GitHub token",
+    pattern:
+      /\b(?:gh[opusr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/
+  },
+  { name: "AWS access key", pattern: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/ },
+  {
+    name: "OpenAI or Anthropic API key",
+    pattern: /\bsk-(?:(?:proj|ant)-)?[A-Za-z0-9_-]{20,}\b/
+  },
+  {
+    name: "Slack token",
+    pattern: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/
+  },
+  {
+    name: "Google API key",
+    pattern: /\bAIza[0-9A-Za-z_-]{35}\b/
+  },
+  {
+    name: "live service API key",
+    pattern: /\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b/
+  },
+  {
+    name: "common service access token",
+    pattern: /\b(?:glpat-|npm_|hf_)[A-Za-z0-9_-]{20,}\b/
+  },
+  {
+    name: "assigned secret value",
+    pattern:
+      /["'`]?\b(?:api[-_]?key|access[-_]?token|auth[-_]?token|client[-_]?secret|secret[-_]?key|aws[-_]?secret[-_]?access[-_]?key)\b["'`]?\s*[:=]\s*["'`]?[A-Za-z0-9._~+/=-]{20,}["'`]?/i
+  },
   { name: "absolute macOS user path", pattern: /\/Users\/[A-Za-z0-9._-]+\// },
   { name: "absolute Linux home path", pattern: /\/home\/[A-Za-z0-9._-]+\// },
   {

@@ -23,17 +23,33 @@ function validateRemote(remote) {
   return url.toString();
 }
 
+function isolatedGitEnvironment() {
+  const env = { ...process.env };
+  for (const name of Object.keys(env)) {
+    if (
+      name === "GIT_CONFIG_PARAMETERS" ||
+      /^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+)$/.test(name)
+    ) {
+      delete env[name];
+    }
+  }
+  delete env.GIT_ASKPASS;
+  delete env.SSH_ASKPASS;
+  return {
+    ...env,
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null"
+  };
+}
+
 function runGit(args, { cwd, timeoutMs = 60_000, maxOutputBytes = 64 * 1024 } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn("git", args, {
+    const child = spawn("git", ["-c", "credential.helper=", "-c", "core.askPass=", ...args], {
       cwd,
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        GIT_TERMINAL_PROMPT: "0",
-        GIT_CONFIG_NOSYSTEM: "1"
-      }
+      env: isolatedGitEnvironment()
     });
     let stdout = "";
     let stderr = "";

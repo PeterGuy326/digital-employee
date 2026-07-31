@@ -15,7 +15,8 @@ behavior.
 - **Role profile** defines instructions and permission defaults.
 - **Escalation policy** makes the final deterministic decision about human
   handoff.
-- **Feedback store** learns only from verified exchanges.
+- **Feedback store** learns only from answered exchanges whose verified
+  feedback is authorized by an injected trusted reviewer boundary.
 - **Tool** declares read/write mode. The `answer-agent` profile blocks write
   tools before execution.
 
@@ -40,6 +41,13 @@ sequenceDiagram
 
 The model cannot create citations: the runtime resolves only IDs present in
 the retrieved evidence set.
+
+FAQ learning also defaults to deny. A host application must inject an
+`authorizeFeedback` function into `DigitalEmployee`, then pass trusted
+authorization context separately as the second argument to
+`recordFeedback(payload, authorizationContext)`. User-controlled fields in
+the feedback payload cannot self-authorize learning, and escalated or failed
+exchanges are never promoted.
 
 ## Package layout
 

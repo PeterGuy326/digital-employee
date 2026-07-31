@@ -150,3 +150,71 @@ test("JobRunner reports queue timeout without running the expired task", async (
   gate.resolve("done")
   await first
 })
+
+test("JobRunner evicts the oldest dedupe entry at the configured capacity", async () => {
+  const runner = new JobRunner({
+    dedupeWindowMs: 1_000,
+    maxSeenJobs: 2,
+  })
+
+  for (const jobId of ["job-1", "job-2", "job-3"]) {
+    assert.equal(
+      await runner.run(
+        { actorId: `actor-${jobId}`, jobId },
+        async () => jobId,
+      ),
+      jobId,
+    )
+  }
+
+  assert.equal(
+    await runner.run(
+      { actorId: "actor-retry", jobId: "job-1" },
+      async () => "evicted",
+    ),
+    "evicted",
+  )
+  await assert.rejects(
+    runner.run(
+      { actorId: "actor-duplicate", jobId: "job-3" },
+      async () => "duplicate",
+    ),
+    (error) => error.code === "DUPLICATE_REQUEST",
+  )
+})
+
+test("JobRunner evicts the oldest cooldown entry at the configured capacity", async () => {
+  const runner = new JobRunner({
+    cooldownMs: 1_000,
+    dedupeWindowMs: 0,
+    maxTrackedActors: 2,
+    clock: () => 1_000,
+  })
+
+  for (const actorId of ["actor-1", "actor-2", "actor-3"]) {
+    assert.equal(
+      await runner.run({ actorId }, async () => actorId),
+      actorId,
+    )
+  }
+
+  assert.equal(
+    await runner.run({ actorId: "actor-1" }, async () => "evicted"),
+    "evicted",
+  )
+  await assert.rejects(
+    runner.run({ actorId: "actor-3" }, async () => "rate-limited"),
+    (error) => error.code === "RATE_LIMITED",
+  )
+})
+
+test("JobRunner validates tracking capacity options", () => {
+  assert.throws(
+    () => new JobRunner({ maxSeenJobs: 0 }),
+    /maxSeenJobs must be an integer greater than or equal to 1/,
+  )
+  assert.throws(
+    () => new JobRunner({ maxTrackedActors: 0 }),
+    /maxTrackedActors must be an integer greater than or equal to 1/,
+  )
+})

@@ -32,6 +32,7 @@ export class DigitalEmployee {
   #maxHistory
   #maxEvidence
   #logger
+  #authorizeFeedback
 
   constructor(options = {}) {
     this.#profile = this.#normalizeProfile(options)
@@ -49,6 +50,7 @@ export class DigitalEmployee {
     this.#maxHistory = options.maxHistory ?? 10
     this.#maxEvidence = options.maxEvidence ?? 5
     this.#logger = options.logger ?? null
+    this.#authorizeFeedback = options.authorizeFeedback ?? null
     this.#tools = new Map()
 
     if (typeof this.#readOnly !== "boolean") {
@@ -95,6 +97,14 @@ export class DigitalEmployee {
         "logger must be null or provide an error() function",
       )
     }
+    if (
+      this.#authorizeFeedback !== null &&
+      typeof this.#authorizeFeedback !== "function"
+    ) {
+      throw new ValidationError(
+        "authorizeFeedback must be null or a function",
+      )
+    }
 
     for (const tool of options.tools ?? []) this.registerTool(tool)
   }
@@ -134,7 +144,7 @@ export class DigitalEmployee {
     }
   }
 
-  recordFeedback(input) {
+  recordFeedback(input, authorizationContext) {
     try {
       if (
         input === null ||
@@ -154,6 +164,32 @@ export class DigitalEmployee {
       }
       const exchange = this.#sessionStore.lastExchange(sessionId)
       if (!exchange) return { stored: false, reason: "no_completed_exchange" }
+      const session =
+        typeof this.#sessionStore.get === "function"
+          ? this.#sessionStore.get(sessionId)
+          : null
+      if (
+        session?.state !== "idle" ||
+        exchange.answerMetadata?.outcome !== "answered"
+      ) {
+        return { stored: false, reason: "exchange_not_answered" }
+      }
+      if (
+        this.#authorizeFeedback === null ||
+        this.#authorizeFeedback({
+          sessionId,
+          requestId: exchange.answerMetadata?.requestId ?? null,
+          feedback,
+          authorization: authorizationContext,
+          exchange: sanitizeDetails({
+            question: exchange.question,
+            answer: exchange.answer,
+            citations: exchange.answerMetadata?.citations ?? [],
+          }),
+        }) !== true
+      ) {
+        return { stored: false, reason: "feedback_not_authorized" }
+      }
       return this.#faqStore.add({
         question: exchange.question,
         answer: exchange.answer,
@@ -271,7 +307,12 @@ export class DigitalEmployee {
         this.#sessionStore.append(request.sessionId, {
           role: "assistant",
           content: answer,
-          metadata: { citations, confidence: response?.confidence },
+          metadata: {
+            requestId: request.requestId,
+            outcome: status,
+            citations,
+            confidence: response?.confidence,
+          },
         })
       }
       this.#sessionStore.setState(
