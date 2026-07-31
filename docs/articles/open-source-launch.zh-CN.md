@@ -34,20 +34,20 @@ D仔的第一版链路很短：
 
 | 真实问题 | 公开版处理 | 代码位置 |
 | --- | --- | --- |
-| Stream 重复投递，同一问题回复两次 | 消息级 TTL 去重，核心任务再次按 `requestId` 去重 | `connectors/channels/dingtalk/message.js`、`packages/core/src/job-runner.js` |
-| 同一用户连续提问、多人并发互相影响 | 同一 actor 忙时返回 `ACTOR_BUSY`，不同 actor 进入全局并发队列 | `packages/core/src/job-runner.js` |
-| 只看代码不够，经验散落在文档、听记和群聊里 | 文件、Git、DWS 三类批准知识源 | `connectors/sources/` |
-| 模型会给出看似合理、实际不存在的引用 | 只解析检索结果中真实存在的 `citationIds` | `packages/core/src/digital-employee.js` |
-| 权限、规划或执行类问题不能靠猜 | 置信度、证据数、引用数和错误状态共同返回转人工信号 | `packages/core/src/escalation-policy.js` |
-| 一次点赞不等于答案已经核验 | Core 只有收到 `verified: true` 的完整问答才写入进程内 FAQ | `packages/core/src/faq-store.js` |
-| 休眠唤醒后连接假活 | 同时观察心跳、下行活动和时钟漂移，连接超时后有限重连 | `connectors/channels/dingtalk/stream.js` |
-| 长回复或异常 Webhook 污染群聊 | Unicode 安全分段、官方域名校验、响应超时和大小限制 | `connectors/channels/dingtalk/reply.js` |
+| Stream 重复投递，同一问题回复两次 | 消息级 TTL 去重，核心任务再次按 `requestId` 去重 | [`message.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/connectors/channels/dingtalk/message.js#L121-L172)、[`digital-employee.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/packages/core/src/digital-employee.js#L125-L131)、[`job-runner.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/packages/core/src/job-runner.js#L151-L173) |
+| 同一用户连续提问、多人并发互相影响 | 同一 actor 忙时返回 `ACTOR_BUSY`，不同 actor 进入全局并发队列 | [`packages/core/src/job-runner.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/packages/core/src/job-runner.js#L151-L240) |
+| 只看代码不够，经验散落在文档、听记和群聊里 | 文件、Git、DWS 三类批准知识源 | [`filesystem`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/connectors/sources/filesystem/index.js#L97-L173)、[`git`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/connectors/sources/git/index.js#L90-L157)、[`dws`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/connectors/sources/dws/index.js#L84-L210) |
+| 模型会给出看似合理、实际不存在的引用 | 只解析检索结果中真实存在的 `citationIds` | [`packages/core/src/digital-employee.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/packages/core/src/digital-employee.js#L383-L389) |
+| 权限、规划或执行类问题不能靠猜 | 置信度、证据数、引用数和错误状态共同返回转人工信号 | [`packages/core/src/escalation-policy.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/packages/core/src/escalation-policy.js#L48-L107) |
+| 一次点赞不等于答案已经核验 | Core 只有收到 `verified: true` 的完整问答才写入进程内 FAQ | [`digital-employee.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/packages/core/src/digital-employee.js#L137-L162)、[`faq-store.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/packages/core/src/faq-store.js#L42-L101) |
+| 休眠唤醒后连接假活 | 同时观察心跳、下行活动和时钟漂移，连接超时后有限重连 | [`connectors/channels/dingtalk/stream.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/connectors/channels/dingtalk/stream.js#L65-L200) |
+| 长回复或异常 Webhook 污染群聊 | Unicode 安全分段、官方域名校验、响应超时和大小限制 | [`connectors/channels/dingtalk/reply.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/connectors/channels/dingtalk/reply.js#L24-L231) |
 
-这张表就是公开版的来路。后面的搭建步骤会逐个把这些文件跑起来。
+这张表就是公开版的来路。后面的搭建步骤会逐个把这些文件跑起来。为避免分支变化造成代码错位，文中的仓库代码链接固定在本次验收基线 [`871ffb8`](https://github.com/fullstack-ai-infra/digital-employee/commit/871ffb8ef95bcfaaa50c5e698ddde1c43459f567)，点击文件名就能直接打开对应实现行。
 
 ## 二、第一步：零凭证跑通“知识—回答—引用—转人工”
 
-先不要接钉钉，也不要急着配模型。用仓库自带的公开手册和本地抽取模型跑通最小闭环：
+先不要接钉钉，也不要急着配模型。用仓库自带的[公开 demo 配置](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/configs/demo.json#L1-L30)、[测试手册](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/examples/knowledge/handbook.md#L1-L24)和本地抽取模型跑通最小闭环：
 
 ```bash
 git clone https://github.com/fullstack-ai-infra/digital-employee.git
@@ -71,7 +71,7 @@ Node.js 需要 20 或更高版本。
 }
 ```
 
-`sync` 在这里不是把资料上传到某个服务，而是用真实运行时加载配置中的知识源，确认能得到多少份可检索文档。入口在 `apps/cli/bin.js`，知识源装配在 `apps/cli/runtime.js`。
+`sync` 在这里不是把资料上传到某个服务，而是用真实运行时加载配置中的知识源，确认能得到多少份可检索文档。入口在 [`apps/cli/bin.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/apps/cli/bin.js#L77-L91)，知识源装配在 [`apps/cli/runtime.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/apps/cli/runtime.js#L100-L140)。
 
 接着问一个资料里有答案的问题：
 
@@ -129,12 +129,12 @@ npm run demo -- \
 
 公开版把“数字员工”和“答疑岗位”分开了。
 
-- `packages/core/` 负责会话、排队、检索、引用、反馈和 `escalation` 判定；
-- `profiles/answer-agent/` 只定义答疑岗位的身份和边界；
-- `connectors/` 负责消息、模型和知识来源；
-- `configs/` 决定这个实例到底读取什么、使用什么模型、从哪里收消息。
+- [`packages/core/`](https://github.com/fullstack-ai-infra/digital-employee/tree/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/packages/core) 负责会话、排队、检索、引用、反馈和 `escalation` 判定；
+- [`profiles/answer-agent/`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/profiles/answer-agent/index.js#L1-L22) 只定义答疑岗位的身份和边界；
+- [`connectors/`](https://github.com/fullstack-ai-infra/digital-employee/tree/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/connectors) 负责消息、模型和知识来源；
+- [`configs/`](https://github.com/fullstack-ai-infra/digital-employee/tree/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/configs) 决定这个实例到底读取什么、使用什么模型、从哪里收消息。
 
-先复制一份配置：
+先复制一份[仓库里的 `configs/demo.json`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/configs/demo.json#L1-L30)：
 
 ```bash
 mkdir -p ../digital-employee-local/knowledge
@@ -301,7 +301,7 @@ dws doc read --help
 npm run sync -- --config ../digital-employee-local/team-dws.json --json
 ```
 
-这条命令会走真实的 `DwsKnowledgeSource.load()`：
+这条命令会走真实的 [`DwsKnowledgeSource.load()`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/connectors/sources/dws/index.js#L152-L210)：
 
 ```text
 读取 approvedQueries
@@ -387,19 +387,19 @@ citations[0].metadata.query = team-handbook
 
 当前连接器不会自动翻页，也不会从搜索结果继续跟进读取更多对象。`drive search` 只提供可检索的文件元数据；如果搜索结果是钉钉文档节点，可以再为这个确定节点显式批准 `doc read`。普通 PDF、Office 等文件正文当前没有读取入口，不能把元数据检索写成“文件内容已经入库”。
 
-连接器还会拒绝写命令、账号发现、近期内容 Feed、全账号聊天搜索、文件下载，以及用户在 `args` 中覆盖 `--profile`、`--format`、凭证或调试参数。当前实现和白名单见 `connectors/sources/dws/policy.js`，操作说明见 `docs/connectors/dws.md`。
+连接器还会拒绝写命令、账号发现、近期内容 Feed、全账号聊天搜索、文件下载，以及用户在 `args` 中覆盖 `--profile`、`--format`、凭证或调试参数。可以直接查看 [`policy.js` 的命令白名单](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/connectors/sources/dws/policy.js#L30-L238)、[参数门禁](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/connectors/sources/dws/policy.js#L317-L424)和 [`docs/connectors/dws.md` 操作说明](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/docs/connectors/dws.md#L7-L177)。
 
 每个 DWS source 最多配置 50 条批准查询。单条查询默认超时 30 秒，stdout 与 stderr 合计最多 2 MiB，单条查询最多提取 500 份文档；这些限制可以在安全上限内收窄或调整。
 
-**DWS 连接器不是脱敏器。** `extract.js` 会排除名称类似 Token、Secret、Password 的 JSON 字段，但不会自动识别正文中的姓名、手机号、邮箱、工号或聊天中的个人信息。聊天记录、听记和文件接入前，仍要单独确认对象授权、保留周期、脱敏流程和模型数据边界。使用 OpenAI-compatible 模型时，命中的知识片段会被发送到配置的模型端点。
+**DWS 连接器不是脱敏器。** [`connectors/sources/dws/extract.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/connectors/sources/dws/extract.js#L81-L183) 会排除名称类似 Token、Secret、Password 的 JSON 字段，但不会自动识别正文中的姓名、手机号、邮箱、工号或聊天中的个人信息。聊天记录、听记和文件接入前，仍要单独确认对象授权、保留周期、脱敏流程和模型数据边界。使用 OpenAI-compatible 模型时，命中的知识片段会被发送到配置的模型端点。
 
-发布前我们做过一次真实 DWS 读取验证：新建一份只含公开测试句子的钉钉文档，只批准这个节点，再用当前 `DwsKnowledgeSource` 执行 `doc read`。结果返回 1 份文档并命中完整校验句。测试没有搜索或读取已有业务资料，Profile、组织、用户、文档和 URL 标识也没有进入仓库。
+发布前我们做过一次真实 DWS 读取验证：新建一份只含公开测试句子的钉钉文档，只批准这个节点，再用当前 [`DwsKnowledgeSource`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/connectors/sources/dws/index.js#L84-L210) 执行 `doc read`。结果返回 1 份文档并命中完整校验句。测试没有搜索或读取已有业务资料，Profile、组织、用户、文档和 URL 标识也没有进入仓库。
 
 听记、群聊、Wiki 和钉盘当前完成的是命令契约核验和进程边界测试，还没有在本次公开发布中逐项使用真实业务账号做在线验证。文章不会把这几项提前写成“全部生产验证完成”。
 
 ## 五、第四步：回答之前，先过引用和转人工判定
 
-知识加载完成后，`packages/core/src/digital-employee.js` 会按下面的顺序处理一次问题：
+知识加载完成后，[`packages/core/src/digital-employee.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/packages/core/src/digital-employee.js#L168-L324) 会按下面的顺序处理一次问题：
 
 ```text
 会话历史
@@ -424,13 +424,13 @@ citations[0].metadata.query = team-handbook
 
 这一步对应 D仔真实运行里的一个原则：代码和资料能够证明的部分先答；权限、安全、产品策略或缺少现场信息的部分明确交给人，不用一句“可能是”把猜测包装成结论。
 
-文件、Git 和 DWS source 在 `createRuntime()` 阶段加载。如果它们读取失败，`sync` 或 `start` 会直接启动失败，不会先进入回答循环再返回 `escalation`；这类错误应先修配置、身份或数据源。
+文件、Git 和 DWS source 在 [`createRuntime()`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/apps/cli/runtime.js#L100-L149) 阶段加载。如果它们读取失败，`sync` 或 `start` 会直接启动失败，不会先进入回答循环再返回 `escalation`；这类错误应先修配置、身份或数据源。
 
 当前公开版的“转人工”是一个确定性判定结果：运行时返回 `status: escalated`、目标和原因，钉钉入口把接力文案回复给提问者。它还不会自动 `@` 专家、创建工单或通知值班群；这些动作要等写工具具备审批、幂等和审计后再接。
 
-FAQ 也不是自动学习。只有直接调用 Core API 的 `recordFeedback()`、明确传入 `verified: true`，并且当前会话里存在一轮已经完成的问答，它才会写入 `VerifiedFaqStore`。未验证反馈会返回 `stored: false`。当前 CLI、HTTP 和钉钉入口都还没有暴露反馈接口，FAQ 也只保存在当前进程内，重启后会清空；所以首版不能宣传成“用户点个赞，机器人就会长期越用越准”。
+FAQ 也不是自动学习。只有直接调用 Core API 的 [`recordFeedback()`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/packages/core/src/digital-employee.js#L137-L166)、明确传入 `verified: true`，并且当前会话里存在一轮已经完成的问答，它才会写入 [`VerifiedFaqStore`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/packages/core/src/faq-store.js#L19-L130)。未验证反馈会返回 `stored: false`。当前 CLI、HTTP 和钉钉入口都还没有暴露反馈接口，FAQ 也只保存在当前进程内，重启后会清空；所以首版不能宣传成“用户点个赞，机器人就会长期越用越准”。
 
-引用、转人工和已验证反馈可以单独回归：
+引用、转人工和已验证反馈可以单独回归；测试入口分别是 [`tests/core/contracts.test.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/tests/core/contracts.test.js#L11-L69) 和 [`tests/core/digital-employee.test.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/tests/core/digital-employee.test.js#L13-L286)：
 
 ```bash
 node --test \
@@ -522,7 +522,7 @@ Stream 回调立即 ACK
   → sessionWebhook 分段回复
 ```
 
-钉钉适配器保留了 D仔在真实群聊里验证过的几类工程处理：
+[`connectors/channels/dingtalk/index.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/connectors/channels/dingtalk/index.js#L130-L360) 里的钉钉适配器保留了 D仔在真实群聊里验证过的几类工程处理：
 
 - Stream 收到消息后立即 ACK；
 - 消息级去重，避免重投导致重复回答；
@@ -532,9 +532,9 @@ Stream 回调立即 ACK
 - Session Webhook 只接受钉钉官方 HTTPS 精确域名；
 - 默认日志不记录问题正文、用户 ID 或 Webhook。
 
-公开仓库没有提交真实应用凭证。ACK、规范化、去重、重连和回复均已通过可注入 SDK、网络、客户端和时钟的自动化测试；真实钉钉应用仍要由使用者在自己的环境里完成在线验收。
+公开仓库没有提交真实应用凭证。ACK、规范化、去重、重连和回复均已通过可注入 SDK、网络、客户端和时钟的自动化测试，测试代码可直接查看 [`stream.test.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/tests/dingtalk/stream.test.js)、[`message.test.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/tests/dingtalk/message.test.js) 和 [`reply.test.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/tests/dingtalk/reply.test.js)；真实钉钉应用仍要由使用者在自己的环境里完成在线验收。
 
-这里还有两个已知缺口。第一，同一用户在前一条问题处理中再次提问时，Core 会返回 `ACTOR_BUSY`，当前钉钉桥接层还不能把这个 rejected 结果转成用户可见的“稍后重试”，第二条消息可能没有回复。第二，有限重连耗尽后，Stream supervisor 会报错，但当前 CLI 没有把致命连接状态暴露成健康端点，也不会主动退出；只在外面套 PM2 或 Docker 不能自动识别这种假活。补齐用户级排队、拒绝提示、致命连接传播和健康检查之前，当前版本不承诺 7×24 小时 SLA。
+这里还有两个已知缺口。第一，同一用户在前一条问题处理中再次提问时，Core 会返回 [`ACTOR_BUSY`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/packages/core/src/job-runner.js#L151-L172)，当前[钉钉桥接层](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/apps/cli/bin.js#L106-L124)还不能把这个 rejected 结果转成用户可见的“稍后重试”，第二条消息可能没有回复。第二，有限重连耗尽后，[Stream supervisor](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/connectors/channels/dingtalk/stream.js#L138-L181) 会报错，但当前 CLI 没有把致命连接状态暴露成健康端点，也不会主动退出；只在外面套 PM2 或 Docker 不能自动识别这种假活。补齐用户级排队、拒绝提示、致命连接传播和健康检查之前，当前版本不承诺 7×24 小时 SLA。
 
 ## 八、真实问题怎么穿过这条链路
 
@@ -544,7 +544,7 @@ Stream 回调立即 ACK
 
 > What should I include in an incident report?
 
-实际结果命中 `examples/knowledge/handbook.md`，返回原文片段和 `source://demo-handbook/handbook.md`。这不是模型凭记忆回答，而是可复现的本地检索结果。
+实际结果命中 [`examples/knowledge/handbook.md`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/examples/knowledge/handbook.md#L15-L19)，返回原文片段和 [`source://demo-handbook/handbook.md`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/examples/knowledge/handbook.md#L15-L19)。这不是模型凭记忆回答，而是可复现的本地检索结果。
 
 ### 案例二：资料外问题返回转人工信号
 
@@ -576,9 +576,9 @@ npm run demo -- \
 
 | 问法 | 状态 | 实际引用 |
 | --- | --- | --- |
-| 临时权限怎样收窄 | `answered` | `source://demo-handbook/handbook.md` |
-| 事故报告怎样避免泄密 | `answered` | `source://demo-handbook/handbook.md` |
-| `0.1` 交付了什么、哪些岗位仍在规划 | `answered` | `source://demo-handbook/release-notes.md` |
+| 临时权限怎样收窄 | `answered` | [`source://demo-handbook/handbook.md`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/examples/knowledge/handbook.md#L9-L13) |
+| 事故报告怎样避免泄密 | `answered` | [`source://demo-handbook/handbook.md`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/examples/knowledge/handbook.md#L15-L19) |
+| `0.1` 交付了什么、哪些岗位仍在规划 | `answered` | [`source://demo-handbook/release-notes.md`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/examples/knowledge/release-notes.md#L3-L9) |
 
 这些问题的 `requestId`、文档哈希和置信度可能随内容变更而变化，验收时看状态、答案片段和引用来源，不要锁死动态字段。
 
@@ -606,7 +606,7 @@ npm run demo -- \
 - 静态代码无法证明的平台策略要转给专家；
 - 第二轮追问需要带上引用上下文，不能重复第一轮答案。
 
-这些真实案例只用于指导公开设计。原群消息、用户标识、专家身份和聊天衍生知识库没有进入开源仓库。当前钉钉适配器虽然能解析 `quotedText`，但只把它放在 metadata，现有模型连接器还不会消费这段文字；引用追问的真正接入仍是待完成项。
+这些真实案例只用于指导公开设计。原群消息、用户标识、专家身份和聊天衍生知识库没有进入开源仓库。当前钉钉适配器虽然能[解析 `quotedText`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/connectors/channels/dingtalk/message.js#L214-L223)，但只把它放在 metadata，现有模型连接器还不会消费这段文字；引用追问的真正接入仍是待完成项。
 
 为了避免只挑一个“能答”的问题，仓库还保存了三组公开知识问答的真实命令输出：
 
@@ -633,7 +633,7 @@ fail 0
 
 <img src="../assets/test-results.png" alt="Digital Employee 测试输出，69 项全部通过" width="100%">
 
-容器入口也可以独立验收：
+容器入口也可以独立验收，对应的 [`compose.yaml`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/compose.yaml#L1-L21) 和 [`Dockerfile`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/Dockerfile#L1-L14) 都可以直接查看：
 
 ```bash
 docker compose up --build -d
@@ -648,7 +648,7 @@ curl -sS \
 docker compose down
 ```
 
-仓库自带的 Compose 只绑定 `127.0.0.1`。如果把 HTTP 服务暴露到其他网络，先在配置中设置 `server.apiTokenEnv`，再通过环境变量提供 Token；内置 HTTP 入口本身是无状态的，客户端也不能指定 `requestId`、`actorId` 或 `sessionId`。
+仓库自带的 Compose 只绑定 `127.0.0.1`。如果把 HTTP 服务暴露到其他网络，先在配置中设置 [`server.apiTokenEnv`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/configs/schema.json#L168-L181)，再通过环境变量提供 Token；内置 HTTP 入口本身是无状态的，客户端也不能指定 `requestId`、`actorId` 或 `sessionId`。
 
 测试不是只看“能不能生成一句回答”，而是覆盖：
 
@@ -676,7 +676,7 @@ docker compose down
 [ ] 修改知识后重启实例，旧内容不会继续被当成最新事实
 ```
 
-更细的验证范围见 [verification ledger](../verification.md)。它明确区分了自动化测试、容器实测、真实 DWS 文档读取，以及仍需要使用者凭证完成的钉钉 Stream 和模型服务验证。
+更细的验证范围见 [`docs/verification.md`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/docs/verification.md#L1-L32)。它明确区分了自动化测试、容器实测、真实 DWS 文档读取，以及仍需要使用者凭证完成的钉钉 Stream 和模型服务验证。
 
 ## 十、哪些已经交付，哪些还没有
 
@@ -699,7 +699,7 @@ docker compose down
 | 写工具与审批工作流 | 规划中，首版禁用 |
 | 托管式多租户 SaaS | 当前非目标 |
 
-`answer-agent` 是第一个岗位，不是整个产品，但当前 `apps/cli/runtime.js` 仍然只接受这一种 profile。新增项目助理或运营员工时，至少要增加 `profiles/<role>/index.js`，修改 `apps/cli/runtime.js` 的 profile 装配、`configs/schema.json` 的配置约束并补测试；涉及写操作时还要先实现审批、预览、幂等和审计。应该复用渠道、会话、知识、模型和错误处理契约，不要复制一套机器人代码后重新踩一次去重、权限和连接的坑。
+`answer-agent` 是第一个岗位，不是整个产品，但当前 [`apps/cli/runtime.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/apps/cli/runtime.js#L87-L98) 仍然只接受这一种 profile。新增项目助理或运营员工时，至少要参照 [`profiles/answer-agent/index.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/profiles/answer-agent/index.js#L1-L22) 新增 `profiles/<role>/index.js`，修改 [`apps/cli/runtime.js`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/apps/cli/runtime.js#L87-L98) 的 profile 装配、[`configs/schema.json`](https://github.com/fullstack-ai-infra/digital-employee/blob/871ffb8ef95bcfaaa50c5e698ddde1c43459f567/configs/schema.json#L13-L43) 的配置约束并补测试；涉及写操作时还要先实现审批、预览、幂等和审计。应该复用渠道、会话、知识、模型和错误处理契约，不要复制一套机器人代码后重新踩一次去重、权限和连接的坑。
 
 ## 十一、仓库与 DWS 开源交流群
 
