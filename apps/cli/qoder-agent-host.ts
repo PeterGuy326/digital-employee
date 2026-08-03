@@ -37,6 +37,10 @@ import {
   executeVersionCommand,
 } from "./agent-hosts.js"
 import type { VersionCommandExecutor } from "./agent-hosts.js"
+import {
+  signalAgentHostProcessTree,
+  waitForAgentHostProcessTreeExit,
+} from "./agent-host-process-tree.js"
 
 const QODER_HOST_ID = "qoder"
 const QODER_DISPLAY_NAME = "Qoder CLI"
@@ -49,6 +53,7 @@ const QODER_SDK_TRANSPORT_VERSION = "1.0.16"
 const DEFAULT_TIMEOUT_MS = 240_000
 const TERMINATION_GRACE_MS = 2_000
 const CLEANUP_ATTEMPTS = 2
+const CLEANUP_ATTEMPT_TIMEOUT_MS = 2_000
 const MAX_PROMPT_BYTES = 256 * 1024
 const MAX_INSTRUCTIONS_BYTES = 128 * 1024
 const MAX_STDOUT_BYTES = 4 * 1024 * 1024
@@ -156,7 +161,9 @@ function byteLength(value: string): number {
 }
 
 function parseConformanceVersion(value: string | undefined): boolean {
-  const match = value?.match(/(?:^|\D)(\d+)\.(\d+)\.(\d+)(?:\D|$)/)
+  const match = value?.match(
+    /(?:^|[^0-9A-Za-z.+_-])(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?![0-9A-Za-z.+_-])/,
+  )
   return Boolean(
     match &&
       Number(match[1]) === CONFORMANCE_MAJOR &&
@@ -500,10 +507,14 @@ function filteredRunEnvironment(
   source: NodeJS.ProcessEnv,
   home: string,
   configDirectory: string,
+  temporaryDirectory: string,
   authPayloadPath: string,
 ): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = {
     HOME: home,
+    TMPDIR: temporaryDirectory,
+    TMP: temporaryDirectory,
+    TEMP: temporaryDirectory,
     QODER_CONFIG_DIR: configDirectory,
     QODER_AGENT_SDK_ENTRYPOINT: "sdk-ts",
     QODER_AGENT_SDK_VERSION: QODER_SDK_TRANSPORT_VERSION,
@@ -532,14 +543,7 @@ function killProcessTree(
   child: QoderChild,
   signal: NodeJS.Signals,
 ): void {
-  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return
-  try {
-    if (process.platform !== "win32") process.kill(-child.pid, signal)
-    else child.kill(signal)
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    if (code !== "ESRCH") child.kill(signal)
-  }
+  signalAgentHostProcessTree(child, signal)
 }
 
 function stopActiveRun(active: ActiveRun, reason: RunStopReason): void {
@@ -573,13 +577,18 @@ function stoppedRunError(active: ActiveRun): QoderAdapterError | undefined {
 
 async function cleanupWithRetry(action: () => Promise<void>): Promise<boolean> {
   for (let attempt = 0; attempt < CLEANUP_ATTEMPTS; attempt += 1) {
-    try {
-      await action()
-      return true
-    } catch {
-      // A second bounded attempt handles transient filesystem contention while
-      // keeping the terminal event deterministic.
-    }
+    let timer: NodeJS.Timeout | undefined
+    const completed = await Promise.race([
+      action().then(
+        () => true,
+        () => false,
+      ),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), CLEANUP_ATTEMPT_TIMEOUT_MS)
+      }),
+    ])
+    if (timer) clearTimeout(timer)
+    if (completed) return true
   }
   return false
 }
@@ -658,6 +667,14 @@ export class QoderAgentHostAdapter implements AgentHostAdapter {
         issue(
           "qoder_version_not_conformance_verified",
           "This Qoder CLI version has not passed adapter conformance",
+        ),
+      )
+    } else if (process.platform === "win32") {
+      status = "not_ready"
+      issues.push(
+        issue(
+          "host_platform_not_conformance_verified",
+          "This adapter requires POSIX process-group cleanup; Windows is not yet runnable",
         ),
       )
     } else if (!this.environment.QODER_PERSONAL_ACCESS_TOKEN?.trim()) {
@@ -779,9 +796,11 @@ export class QoderAgentHostAdapter implements AgentHostAdapter {
       )
       const workspace = path.join(runRoot, "workspace")
       const configDirectory = path.join(runRoot, "config")
+      const temporaryDirectory = path.join(runRoot, "tmp")
       await Promise.all([
         mkdir(workspace, { mode: 0o700 }),
         mkdir(configDirectory, { mode: 0o700 }),
+        mkdir(temporaryDirectory, { mode: 0o700 }),
       ])
 
       for (const file of projection.files) {
@@ -792,18 +811,36 @@ export class QoderAgentHostAdapter implements AgentHostAdapter {
         await this.beforeProjectionOpen?.(file.sourcePath)
         const handle = await open(
           file.sourcePath,
-          constants.O_RDONLY | (constants.O_NOFOLLOW || 0),
+          constants.O_RDONLY |
+            (constants.O_NOFOLLOW || 0) |
+            (constants.O_NONBLOCK || 0),
         )
         try {
           const before = await handle.stat({ bigint: true })
           if (!projectionIdentityMatches(before, file)) {
             throw new QoderAdapterError("qoder_projection_changed_during_copy")
           }
-          const content = await handle.readFile()
+          const expectedBytes = Number(file.size)
+          const bounded = Buffer.alloc(expectedBytes + 1)
+          let bytesRead = 0
+          while (bytesRead < bounded.byteLength) {
+            const result = await handle.read(
+              bounded,
+              bytesRead,
+              bounded.byteLength - bytesRead,
+              bytesRead,
+            )
+            if (result.bytesRead === 0) break
+            bytesRead += result.bytesRead
+          }
           const after = await handle.stat({ bigint: true })
-          if (!projectionIdentityMatches(after, file)) {
+          if (
+            bytesRead !== expectedBytes ||
+            !projectionIdentityMatches(after, file)
+          ) {
             throw new QoderAdapterError("qoder_projection_changed_during_copy")
           }
+          const content = bounded.subarray(0, expectedBytes)
           await writeFile(destination, content, { flag: "wx", mode: 0o400 })
           await chmod(destination, 0o400)
         } finally {
@@ -934,6 +971,7 @@ export class QoderAgentHostAdapter implements AgentHostAdapter {
           this.environment,
           runRoot,
           configDirectory,
+          temporaryDirectory,
           authPayloadPath,
         ),
       })
@@ -1368,11 +1406,7 @@ export class QoderAgentHostAdapter implements AgentHostAdapter {
       if (deadlineTimer) clearTimeout(deadlineTimer)
       if (abortListener) request.signal?.removeEventListener("abort", abortListener)
       if (active.forceTimer) clearTimeout(active.forceTimer)
-      if (
-        active.child &&
-        active.child.exitCode === null &&
-        active.child.signalCode === null
-      ) {
+      if (active.child) {
         killProcessTree(active.child, "SIGKILL")
         if (active.closed) {
           let closeTimer: NodeJS.Timeout | undefined
@@ -1390,6 +1424,14 @@ export class QoderAgentHostAdapter implements AgentHostAdapter {
           ])
           if (closeTimer) clearTimeout(closeTimer)
           if (!childClosed) cleanupSucceeded = false
+        }
+        if (
+          !(await waitForAgentHostProcessTreeExit(
+            active.child,
+            TERMINATION_GRACE_MS,
+          ))
+        ) {
+          cleanupSucceeded = false
         }
       }
       if (authPayloadPath) {
