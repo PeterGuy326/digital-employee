@@ -98,7 +98,11 @@ const init = {
 async function executeRun() {
   await writeCapture()
   if (mode === "hang") {
-    await new Promise(() => {})
+    // An unresolved top-level await does not keep Node alive by itself. Hold a
+    // referenced timer so only the Adapter's deadline/cancel path ends it.
+    await new Promise(() => {
+      setInterval(() => {}, 1_000)
+    })
   } else if (mode === "stderr-oversize") {
     process.stderr.write("x".repeat(300 * 1024))
     await new Promise(() => {})

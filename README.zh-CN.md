@@ -2,19 +2,21 @@
 
 [English](README.md)
 
-Digital Employee 正在被构建为一套开源的数字员工 CLI、员工包契约和外层服务边界。模型推理、上下文和工具循环由 Claude Code、Qoder CLI、Codex 等 Agent host 负责；目标外层负责 Host Adapter、权限策略、消息入口、队列、审计和人工接力。
+Digital Employee 是一套开源的数字员工 CLI、员工包契约和本地执行框架。模型推理、上下文和工具循环由 Claude Code、Qoder CLI、Codex 等 Agent Host 负责；框架负责 Host Adapter、权限策略、包完整性、标准事件和 Runner 执行边界。
 
-当前源码已交付 CLI、可移植员工包、无模型预检，以及四条版本锁定的 one-shot 上下文/只读 Adapter：Qoder CLI、Claude Code、Qwen Code 和 CodeBuddy Code。Agent-native 长期在线服务层（`service start`）还没有交付。
+当前源码已交付 CLI、可移植员工包、无模型预检、四条版本锁定的 one-shot 上下文/只读 Adapter，以及 V0.3 Runner 技术预览：平台签名任务、确定性包摘要、本机密封快照、租约 fencing、标准事件链和 Runner 签名回执。长期在线 Runner 进程、平台网络 API 和设备认证还没有交付。
 
 首个员工 recipe 是 `answer-agent`：一个默认只读、答案带出处、证据不足就转人工的团队答疑员工。现有 `0.1` 问答实现作为 `standalone-v1` 兼容运行时保留，不再作为通用 Agent 能力的主要演进方向。
 
 ```mermaid
 flowchart LR
-  P["员工源码包<br/>employee.json · SKILL.md · Schema"] --> O["Digital Employee<br/>CLI + 外层服务运行时"]
+  C["私有平台控制面"] -->|"签名任务；出站拉取"| R["发布者自有电脑/服务器<br/>Runner"]
+  P["员工源码包<br/>employee.json · SKILL.md · Schema"] --> R
+  R --> O["Digital Employee<br/>CLI + 本地执行框架"]
   O --> H["Host Adapter"]
   H --> A["Claude Code · Qoder CLI · Qwen Code · CodeBuddy Code<br/>Codex 仅探测"]
   A --> T["原生 Agent 循环<br/>Skills · MCP · Tools"]
-  O -. "目标服务层（尚未迁移完成）" .-> S["通道 · 队列 · 策略 · 审计 · 人工接力"]
+  R -->|"事件链 + 签名回执"| C
 ```
 
 ## 先走通一条实践路径
@@ -59,9 +61,17 @@ Claude Code、Qwen Code 或 CodeBuddy 使用同样的 `validate/run` 命令，�
 | `qwen-code` | Qwen Code `0.17.1` | `OPENAI_API_KEY`、`OPENAI_MODEL` |
 | `codebuddy` | CodeBuddy Code `2.106.4` | `CODEBUDDY_API_KEY`、`CODEBUDDY_MODEL` |
 
+## 发布者自有机器上的 Runner 路径
+
+所有应用/服务机器人都必须在发布者或运营者自己的电脑或服务器上运行。私有平台只保存上架身份、包摘要、Quote、租约、事件和结算记录；它不保存员工包本地路径、包内容或 Agent Host 凭证，也不会反向连接用户机器。
+
+V0.3 源码已经提供可嵌入的 one-shot Runner 执行内核和签名续租状态机。一个长期在线 Runner 应当只做出站操作：拉取并认领任务、接收平台签名租约、按身份从本机解析员工包、调用本机 Agent Host、上传 hash-chain 事件和签名回执。平台必须再通过独立 `UsageVerifier` 核验用量，Runner 自报 token 不能直接扣 Credit。
+
+完整接入顺序、伪代码和生产缺口见 [Runner 实践路径](docs/runner.md)，信任边界见 [ADR 0002](docs/decisions/0002-runner-execution-boundary.md)。当前没有对外宣称可直接部署的 `runner start` 网络服务；设备认证、持久化 replay、断线重连和平台 HTTP/gRPC API 仍由后续私有部署层实现。
+
 ## 版本状态
 
-当前源码是包含上述 Agent-native 命令的本地 `0.2.0` 发布候选；它**尚未**发布到 npm、GHCR 或 GitHub Releases。在所有发布渠道完成前，请从当前源码运行 `init`、`validate`、`doctor` 和 `run`，不要宣称 `0.2.0` 已可公开安装，也不要覆盖或重新标记 `0.1.0`。
+当前源码是包含上述 Agent-native 命令和 Runner 执行内核的本地 `0.3.0` 发布候选；它**尚未**发布到 npm、GHCR 或 GitHub Releases。在所有发布渠道完成前，请从当前源码运行和集成，不要宣称 `0.3.0` 已可公开安装，也不要覆盖或重新标记 `0.1.0`。
 
 冻结的 `0.1.0` 兼容版本通过三个公开渠道分发：
 
@@ -200,6 +210,8 @@ DWS 的安装、授权和完整能力请查看
 | `init`、静态 `validate`、本机 `doctor` | 已交付（源码分支） |
 | Qoder CLI 1.1.x 无状态只读 `run --engine qoder` Adapter | 已交付（源码分支）；未使用真实模型权益验收 |
 | Claude Code `>=2.1.214 <2.2.0`、Qwen Code `0.17.1`、CodeBuddy Code `2.106.4` 上下文 Adapter | 已交付（源码分支）；未使用真实模型权益验收 |
+| 签名任务、包摘要、本机快照、租约 fencing、事件链、Runner 签名回执 | 已交付（V0.3 源码技术预览） |
+| 长期在线 Runner 网络进程、设备认证、持久化 replay/重连 | 尚未交付；需要私有部署层 |
 | Agent-native `service start`（通道、队列、审计、长期在线） | 尚未交付；下一阶段 |
 | Codex CLI 运行 Adapter | 仅探测；受阻于无法可靠移除所有模型可见内建工具 |
 | `standalone-v1` 岗位及渠道、知识源、模型、工具 registry | 已交付；兼容路径 |
@@ -210,7 +222,7 @@ DWS 的安装、授权和完整能力请查看
 | 引用、人工接力、仅确认反馈后学习 FAQ | 已交付 |
 | 项目助理、运营员工等员工包 | 规划中 |
 | 写工具与审批流 | 规划中；首版禁用 |
-| 市场、定价与托管式多租户 SaaS | 独立的未来平台；本仓库和 `0.2.0` CLI 候选均未交付 |
+| 市场、定价、可信用量与结算 | 独立私有平台；不进入本框架仓库 |
 
 ## 安全默认值
 
@@ -229,7 +241,7 @@ DWS 的安装、授权和完整能力请查看
 
 ## 与 `design-system`、平台和 `mem` 的关系
 
-`design-system` 只是未来管理页面可复用的 UI 资产，不是 `digital-employee` 的运行时。机器人上架、租赁、动态价格、计量、评价和分账属于未来独立平台；本仓库先把“员工能被一致构建、校验、运行和包装”做好。
+`design-system` 只是未来管理页面可复用的 UI 资产，不是 `digital-employee` 的运行时。机器人上架、租赁、动态价格、可信计量、评价和分账属于独立的私有平台；本仓库只负责“员工能被一致构建、校验，并在发布者机器上安全运行”。平台不能导入或托管 Agent Host 执行代码。
 
 [`mem`](https://github.com/fullstack-ai-infra/mem) 可以作为后续可选的长期记忆与检索能力，本项目不重复建设 memory plane。
 

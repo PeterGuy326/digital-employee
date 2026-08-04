@@ -19,7 +19,10 @@ import type {
 import { CoreError } from "../../packages/core/src/contracts.js"
 import type { SafeValue } from "../../packages/core/src/contracts.js"
 import { builtInAgentHostRegistry } from "./agent-host-registry.js"
-import { inspectEmployeePackage } from "./employee-package.js"
+import {
+  computeEmployeePackageDirectoryDigest,
+  inspectEmployeePackage,
+} from "./employee-package.js"
 
 export const EMPLOYEE_RUN_SCHEMA_VERSION = "employee-run.v1alpha1" as const
 
@@ -49,6 +52,8 @@ export interface RunEmployeePackageOptions {
   hostRegistry?: AgentHostRegistryPort
   input: unknown
   runId?: string
+  /** Fail closed if the exact local declared package bytes do not match. */
+  expectedPackageDigest?: string
   deadline?: string
   signal?: AbortSignal
   onEvent?: (event: AgentHostEvent) => void | Promise<void>
@@ -95,11 +100,49 @@ async function cancelAdapterSafely(
   adapter: { cancel?(runId: string): Promise<void> },
   runId: string,
 ): Promise<void> {
+  if (!adapter.cancel) return
+  let timeout: ReturnType<typeof setTimeout> | undefined
   try {
-    await adapter.cancel?.(runId)
+    await Promise.race([
+      adapter.cancel(runId),
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, 500)
+        timeout.unref()
+      }),
+    ])
   } catch {
     // The outer result remains failed. Adapter cleanup failures must not turn
     // a fail-closed result into an unhandled rejection.
+  } finally {
+    if (timeout) clearTimeout(timeout)
+  }
+}
+
+type AbortableResult<T> =
+  | { status: "resolved"; value: T }
+  | { status: "rejected" }
+  | { status: "aborted" }
+
+/** Settles locally even when a trusted Host operation ignores AbortSignal. */
+async function settleAbortably<T>(
+  operation: Promise<T>,
+  signal?: AbortSignal,
+): Promise<AbortableResult<T>> {
+  const settled = operation.then(
+    (value): AbortableResult<T> => ({ status: "resolved", value }),
+    (): AbortableResult<T> => ({ status: "rejected" }),
+  )
+  if (!signal) return settled
+  if (signal.aborted) return { status: "aborted" }
+  let onAbort: (() => void) | undefined
+  const aborted = new Promise<AbortableResult<T>>((resolve) => {
+    onAbort = () => resolve({ status: "aborted" })
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
+  try {
+    return await Promise.race([settled, aborted])
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort)
   }
 }
 
@@ -297,6 +340,24 @@ export async function runEmployeePackage(
     engine,
   }
 
+  const packageDigestMatches = async (): Promise<boolean> => {
+    if (!options.expectedPackageDigest) return true
+    if (!/^sha256:[a-f0-9]{64}$/.test(options.expectedPackageDigest)) {
+      return false
+    }
+    try {
+      return (
+        (await computeEmployeePackageDirectoryDigest(inspection.directory)) ===
+        options.expectedPackageDigest
+      )
+    } catch {
+      return false
+    }
+  }
+  if (!(await packageDigestMatches())) {
+    return failed(identity, "employee_package_digest_mismatch")
+  }
+
   let validateInput: ReturnType<typeof compileValidator>
   try {
     validateInput = compileValidator(inspection.artifacts.inputSchema)
@@ -336,13 +397,42 @@ export async function runEmployeePackage(
     ...(options.deadline ? { deadline: options.deadline } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
   })
+  const publishEvent = async (
+    event: AgentHostEvent,
+  ): Promise<AbortableResult<void>> => {
+    if (!options.onEvent) return { status: "resolved", value: undefined }
+    try {
+      return await settleAbortably(
+        Promise.resolve(options.onEvent(event)),
+        options.signal,
+      )
+    } catch {
+      return { status: "rejected" }
+    }
+  }
 
   let preflight: AgentHostProbeResult
+  if (options.signal?.aborted) {
+    await cancelAdapterSafely(adapter, runId)
+    return failed(identity, "agent_host_cancelled", true)
+  }
+  let preflightResult: AbortableResult<AgentHostProbeResult>
   try {
-    preflight = await adapter.preflight(request)
+    preflightResult = await settleAbortably(
+      adapter.preflight(request),
+      options.signal,
+    )
   } catch {
     return failed(identity, "agent_host_preflight_failed", true)
   }
+  if (preflightResult.status === "aborted") {
+    await cancelAdapterSafely(adapter, runId)
+    return failed(identity, "agent_host_cancelled", true)
+  }
+  if (preflightResult.status === "rejected") {
+    return failed(identity, "agent_host_preflight_failed", true)
+  }
+  preflight = preflightResult.value
   try {
     preflight = validateAgentHostProbeResult(preflight, engine)
   } catch {
@@ -363,13 +453,53 @@ export async function runEmployeePackage(
     )
   }
 
+  // Preflight is operator-trusted code, but a successful remotely-receipted
+  // run must still execute the exact publisher package accepted above.
+  if (!(await packageDigestMatches())) {
+    return failed(identity, "employee_package_digest_mismatch")
+  }
+
   let terminal: Extract<
     AgentHostEvent,
     { type: "run.completed" | "run.failed" }
   > | undefined
   let streamInvalid = false
+  let removeAbortListener: (() => void) | undefined
   try {
-    for await (const event of adapter.run(request)) {
+    const iterator = adapter.run(request)[Symbol.asyncIterator]()
+    const abortResult = { kind: "aborted" as const }
+    const abortPromise = options.signal
+      ? new Promise<typeof abortResult>((resolve) => {
+          const onAbort = () => resolve(abortResult)
+          if (options.signal!.aborted) {
+            resolve(abortResult)
+          } else {
+            options.signal!.addEventListener("abort", onAbort, { once: true })
+            removeAbortListener = () =>
+              options.signal!.removeEventListener("abort", onAbort)
+          }
+        })
+      : undefined
+    while (true) {
+      const nextPromise = Promise.resolve(iterator.next()).then(
+        (result) => ({ kind: "event" as const, result }),
+        () => ({ kind: "stream_error" as const }),
+      )
+      const next = abortPromise
+        ? await Promise.race([nextPromise, abortPromise])
+        : await nextPromise
+      if (next.kind === "aborted") {
+        await cancelAdapterSafely(adapter, runId)
+        try {
+          void Promise.resolve(iterator.return?.()).catch(() => undefined)
+        } catch {
+          // The cancelled result is already fail-closed.
+        }
+        return failed(identity, "agent_host_cancelled", true)
+      }
+      if (next.kind === "stream_error") throw new Error("agent_host_stream_failed")
+      if (next.result.done) break
+      const event = next.result.value
       if (
         event.runId !== runId ||
         !Number.isFinite(Date.parse(event.timestamp)) ||
@@ -388,20 +518,40 @@ export async function runEmployeePackage(
         terminal = event
         continue
       }
-      await options.onEvent?.(event)
+      const publication = await publishEvent(event)
+      if (publication.status === "aborted") {
+        await cancelAdapterSafely(adapter, runId)
+        try {
+          void Promise.resolve(iterator.return?.()).catch(() => undefined)
+        } catch {
+          // The cancelled result is already fail-closed.
+        }
+        return failed(identity, "agent_host_cancelled", true)
+      }
+      if (publication.status === "rejected") {
+        throw new Error("agent_host_event_handler_failed")
+      }
     }
   } catch {
     await cancelAdapterSafely(adapter, runId)
     return failed(identity, "agent_host_stream_failed", true)
+  } finally {
+    removeAbortListener?.()
   }
 
   if (streamInvalid || !terminal) {
     return failed(identity, "agent_host_terminal_contract_violated")
   }
+  if (!(await packageDigestMatches())) {
+    return failed(identity, "employee_package_digest_mismatch")
+  }
   if (terminal.type === "run.failed") {
-    try {
-      await options.onEvent?.(terminal)
-    } catch {
+    const publication = await publishEvent(terminal)
+    if (publication.status === "aborted") {
+      await cancelAdapterSafely(adapter, runId)
+      return failed(identity, "agent_host_cancelled", true)
+    }
+    if (publication.status === "rejected") {
       return failed(identity, "agent_host_event_handler_failed", true)
     }
     return failed(
@@ -420,9 +570,12 @@ export async function runEmployeePackage(
     return failed(identity, "employee_output_schema_invalid")
   }
 
-  try {
-    await options.onEvent?.(terminal)
-  } catch {
+  const publication = await publishEvent(terminal)
+  if (publication.status === "aborted") {
+    await cancelAdapterSafely(adapter, runId)
+    return failed(identity, "agent_host_cancelled", true)
+  }
+  if (publication.status === "rejected") {
     return failed(identity, "agent_host_event_handler_failed", true)
   }
 

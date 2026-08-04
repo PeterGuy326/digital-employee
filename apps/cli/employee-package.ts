@@ -1,12 +1,16 @@
 import {
+  chmod,
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readFile,
   rename,
   rm,
   writeFile,
 } from "node:fs/promises"
+import { constants as fsConstants } from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import { Ajv2020 } from "ajv/dist/2020.js"
 import { parseDocument } from "yaml"
@@ -19,6 +23,8 @@ import type { EmployeePackageManifest } from "../../packages/core/src/employee-p
 import { assertPlainObject } from "../../packages/core/src/contracts.js"
 import { validateEmployeeMcpManifest } from "../../packages/core/src/employee-mcp.js"
 import type { EmployeeMcpManifest } from "../../packages/core/src/employee-mcp.js"
+import { computeEmployeePackageDigest } from "../../packages/core/src/employee-package-digest.js"
+import type { EmployeePackageDigestEntry } from "../../packages/core/src/employee-package-digest.js"
 
 const MAX_MANIFEST_BYTES = 256 * 1024
 const MAX_SKILL_BYTES = 128 * 1024
@@ -41,6 +47,14 @@ export interface EmployeePackageInspection extends EmployeePackageSummary {
     outputSchema: Record<string, unknown>
     mcp?: EmployeeMcpManifest
   }
+}
+
+export interface SealedEmployeePackageSnapshot {
+  /** Local ephemeral projection; never sent to or hosted by the platform. */
+  directory: string
+  digest: string
+  manifest: EmployeePackageManifest
+  cleanup(): Promise<void>
 }
 
 export interface CreateEmployeePackageOptions {
@@ -451,5 +465,151 @@ export async function inspectEmployeePackage(
       outputSchema,
       ...(mcpManifest ? { mcp: mcpManifest } : {}),
     },
+  }
+}
+
+async function readRegularFileNoFollow(
+  filePath: string,
+  maxBytes: number,
+  label: string,
+): Promise<Buffer> {
+  let handle
+  try {
+    handle = await open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+    const stat = await handle.stat()
+    if (!stat.isFile() || stat.size > maxBytes) {
+      throw new TypeError(`employee_package_file_invalid_for_snapshot:${label}`)
+    }
+    const bytes = await handle.readFile()
+    if (bytes.length !== stat.size) {
+      throw new TypeError(`employee_package_file_changed_during_snapshot:${label}`)
+    }
+    return bytes
+  } catch (error) {
+    if (
+      error instanceof TypeError &&
+      error.message.startsWith("employee_package_file_")
+    ) {
+      throw error
+    }
+    throw new TypeError(`employee_package_file_unavailable_for_snapshot:${label}`)
+  } finally {
+    await handle?.close()
+  }
+}
+
+async function readPackageDigestEntries(
+  directory: string,
+  inspection: EmployeePackageInspection,
+): Promise<EmployeePackageDigestEntry[]> {
+  const portablePaths = [
+    ...new Set([
+      `./${EMPLOYEE_PACKAGE_MANIFEST_NAME}`,
+      ...inspection.files,
+    ]),
+  ]
+  const entries: EmployeePackageDigestEntry[] = []
+  let totalBytes = 0
+  for (const portablePath of portablePaths) {
+    const filePath = await resolvePackageFile(directory, portablePath)
+    const bytes = await readRegularFileNoFollow(
+      filePath,
+      portablePath === `./${EMPLOYEE_PACKAGE_MANIFEST_NAME}`
+        ? MAX_MANIFEST_BYTES
+        : MAX_ASSET_BYTES,
+      portablePath,
+    )
+    totalBytes += bytes.length
+    if (totalBytes > MAX_TOTAL_BYTES + MAX_MANIFEST_BYTES) {
+      throw new TypeError("employee_package_snapshot_too_large")
+    }
+    entries.push({ path: portablePath, bytes })
+  }
+  return entries
+}
+
+export async function computeEmployeePackageDirectoryDigest(
+  requestedDirectory: string,
+): Promise<string> {
+  const inspection = await inspectEmployeePackage(requestedDirectory)
+  return computeEmployeePackageDigest(
+    await readPackageDigestEntries(inspection.directory, inspection),
+  )
+}
+
+/**
+ * Copies a publisher-owned local package into a per-run read-only projection.
+ * The platform supplies identity and digest only; it never supplies package
+ * bytes, a path, Agent credentials, or an Agent Host.
+ */
+export async function createSealedEmployeePackageSnapshot(
+  requestedDirectory: string,
+): Promise<SealedEmployeePackageSnapshot> {
+  const source = await inspectEmployeePackage(requestedDirectory)
+  const entries = await readPackageDigestEntries(source.directory, source)
+  const digest = computeEmployeePackageDigest(entries)
+  const temporaryRoot = await mkdtemp(
+    path.join(os.tmpdir(), "digital-employee-runner-"),
+  )
+  const directory = path.join(temporaryRoot, source.manifest.name)
+  const directories = new Set<string>([directory])
+  try {
+    await mkdir(directory, { mode: 0o700 })
+    for (const entry of entries) {
+      const destination = path.join(directory, entry.path.slice(2))
+      const parent = path.dirname(destination)
+      await mkdir(parent, { recursive: true, mode: 0o700 })
+      let current = parent
+      while (current.startsWith(directory)) {
+        directories.add(current)
+        if (current === directory) break
+        current = path.dirname(current)
+      }
+      await writeFile(destination, entry.bytes, {
+        flag: "wx",
+        mode: 0o400,
+      })
+    }
+    const sealed = await inspectEmployeePackage(directory)
+    if (
+      sealed.manifest.name !== source.manifest.name ||
+      sealed.manifest.version !== source.manifest.version
+    ) {
+      throw new TypeError("employee_package_changed_during_snapshot")
+    }
+    const sealedDigest = computeEmployeePackageDigest(
+      await readPackageDigestEntries(directory, sealed),
+    )
+    if (sealedDigest !== digest) {
+      throw new TypeError("employee_package_changed_during_snapshot")
+    }
+    for (const item of [...directories].sort((a, b) => b.length - a.length)) {
+      await chmod(item, 0o500)
+    }
+    return {
+      directory,
+      digest,
+      manifest: sealed.manifest,
+      async cleanup() {
+        for (const item of [...directories].sort((a, b) => a.length - b.length)) {
+          try {
+            await chmod(item, 0o700)
+          } catch {
+            // Cleanup remains best effort for already-removed paths.
+          }
+        }
+        await rm(temporaryRoot, { recursive: true, force: true })
+      },
+    }
+  } catch (error) {
+    for (const item of [...directories].sort((a, b) => a.length - b.length)) {
+      try {
+        await chmod(item, 0o700)
+      } catch {
+        // Continue cleanup after partial construction.
+      }
+    }
+    await rm(temporaryRoot, { recursive: true, force: true })
+    throw error
   }
 }

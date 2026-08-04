@@ -4,8 +4,9 @@ Digital Employee is an Agent-native employee packaging CLI and outer service
 runtime. It reuses a capable Agent host instead of implementing a second
 general-purpose Agent loop.
 
-The normative boundary decision is recorded in
-[ADR 0001](decisions/0001-agent-host-boundary.md).
+The normative Host boundary is recorded in
+[ADR 0001](decisions/0001-agent-host-boundary.md); the publisher-owned Runner
+boundary is recorded in [ADR 0002](decisions/0002-runner-execution-boundary.md).
 
 ## Two runtime layers
 
@@ -45,6 +46,27 @@ they are moved behind an Agent-host service command.
 The outer layer does not call a host as if it were a plain text-completion
 model and then run another tool loop around it. It also does not persist or
 require private chain-of-thought.
+
+## Publisher-owned Runner boundary
+
+Every application/service employee executes on its publisher or operator's
+own computer or server. A private marketplace control plane may create tasks,
+reserve Credits and settle independently verified usage, but it never runs an
+employee package, stores its local path, or holds an Agent Host credential.
+
+The V0.3 source preview adds the transport-neutral execution kernel:
+
+- deterministic package digests over exact declared bytes;
+- per-run sealed local package snapshots;
+- Ed25519 task and receipt envelopes with distinct signature domains;
+- signed full-payload lease renewals, 30-second clock-skew tolerance and
+  half-open validity windows;
+- attempt/fencing identity, replay-guard port and a 5-second upload margin;
+- bounded hash-chained events and receipt-bound event/usage summaries.
+
+The Runner is always an outbound client. The current source does not provide a
+long-running network daemon, device authentication, durable replay store or
+platform HTTP/gRPC client. See [the Runner integration path](runner.md).
 
 ## Portable employee source package
 
@@ -194,10 +216,12 @@ docs/decisions/               Architecture decision records
 
 ## Product boundary
 
-This repository builds and packages employees. A future marketplace or
-management platform may register packages, dispatch jobs, meter usage, collect
-ratings and settle payments, but pricing, rental, billing, revenue sharing and
-multi-tenant hosting are not part of this core CLI/runtime.
+This repository builds, packages and executes employees on publisher-owned
+machines. The separate private marketplace control plane registers immutable
+release identities, dispatches signed jobs, verifies usage and settles
+Credits. Pricing, rental, billing, ratings, revenue sharing and marketplace
+accounts are intentionally not part of this framework. The platform must not
+import Host Adapter execution code or become an employee hosting service.
 
 Tencent WorkBuddy GUI is currently treated as an upper-level workbench and
 context/MCP gateway. It is not a peer Agent host until it exposes a stable

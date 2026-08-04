@@ -2,16 +2,17 @@
 
 [简体中文](README.zh-CN.md)
 
-Digital Employee is being built as an open CLI, package contract and outer
-service boundary for portable digital employees. Claude Code, Qoder CLI, Codex
-or another capable Agent host owns the model, context and native tool loop. The
-target outer layer owns host adapters, policy, channels, queues, audit and
-human escalation.
+Digital Employee is an open CLI, package contract and local execution framework
+for portable digital employees. Claude Code, Qoder CLI, Codex or another
+capable Agent Host owns the model, context and native tool loop. The framework
+owns host adapters, policy, package integrity, normalized events and the Runner
+execution boundary.
 
 The current source delivers the CLI, portable employee package, model-free
-preflight and four version-gated, one-shot context/read-only adapters: Qoder
-CLI, Claude Code, Qwen Code and CodeBuddy Code. The Agent-native long-running
-service layer (`service start`) is not shipped yet.
+preflight, four version-gated one-shot adapters, and a V0.3 Runner preview:
+platform-signed tasks, deterministic package digests, sealed local snapshots,
+lease fencing, hash-chained events and Runner-signed receipts. A long-running
+Runner process, platform network API and device authentication are not shipped.
 
 The first recipe is `answer-agent`: a read-only team support employee that
 answers with citations, refuses unsupported claims, and escalates uncertainty
@@ -20,11 +21,13 @@ to a human. The original `0.1` answer runtime remains available as the
 
 ```mermaid
 flowchart LR
-  P["Employee source<br/>employee.json · SKILL.md · Schema"] --> O["Digital Employee<br/>CLI + outer runtime"]
+  C["Private platform control plane"] -->|"signed task; outbound pull"| R["Publisher-owned computer/server<br/>Runner"]
+  P["Employee source<br/>employee.json · SKILL.md · Schema"] --> R
+  R --> O["Digital Employee<br/>CLI + local framework"]
   O --> H["Host Adapter"]
   H --> A["Claude Code · Qoder CLI · Qwen Code · CodeBuddy Code<br/>Codex probe-only"]
   A --> T["Native Agent loop<br/>Skills · MCP · Tools"]
-  O -. "target service layer (not migrated yet)" .-> S["Channels · queue · policy · audit · escalation"]
+  R -->|"event chain + signed receipt"| C
 ```
 
 ## Source-tree workflow
@@ -59,6 +62,26 @@ tool contract.
 | `claude-code` | Claude Code `>=2.1.214 <2.2.0` | `ANTHROPIC_API_KEY` |
 | `qwen-code` | Qwen Code `0.17.1` | `OPENAI_API_KEY`, `OPENAI_MODEL` |
 | `codebuddy` | CodeBuddy Code `2.106.4` | `CODEBUDDY_API_KEY`, `CODEBUDDY_MODEL` |
+
+## Runner on a publisher-owned machine
+
+Every application/service employee runs on the publisher or operator's own
+computer or server. The private platform stores listing identity, package
+digest, Quote, lease, events and settlement records. It never stores a local
+package path, employee package contents or Agent Host credentials, and it never
+dials into the operator machine.
+
+V0.3 provides an embeddable one-shot Runner executor and a signed-renewal lease
+state machine. A long-running Runner must use outbound calls only: claim a
+task, accept a platform-signed lease, resolve the employee package by identity
+on the local machine, invoke a local Agent Host, and upload hash-chained events
+plus a signed receipt. A separate platform `UsageVerifier` must approve
+billable facts; Runner-attested tokens never debit Credits directly.
+
+See the [Runner integration path](docs/runner.md) and [ADR 0002](docs/decisions/0002-runner-execution-boundary.md).
+There is no claim that a deployable `runner start` network daemon exists yet;
+device auth, durable replay, reconnect and the platform HTTP/gRPC API remain
+private deployment work.
 
 Every runnable adapter is stateless and one-shot. It requires an explicit
 deployment service credential and never reuses a personal CLI login. Unlike
@@ -95,11 +118,11 @@ be terminated and verified before a terminal event is published.
 
 ## Release status
 
-The current source is a local `0.2.0` release candidate for the Agent-native
-commands above. It has **not** been published to npm, GHCR, or GitHub Releases;
-use this source checkout for `init`, `validate`, `doctor` and `run` until all
-release channels complete. Do not claim that `0.2.0` is publicly installable,
-and do not retag or overwrite `0.1.0`.
+The current source is a local `0.3.0` release candidate for the Agent-native
+commands and Runner kernel above. It has **not** been published to npm, GHCR,
+or GitHub Releases; use this source checkout until all release channels
+complete. Do not claim that `0.3.0` is publicly installable, and do not retag or
+overwrite `0.1.0`.
 
 The frozen `0.1.0` compatibility release is distributed through three public
 channels:
@@ -298,6 +321,8 @@ container, live DWS, and not-yet-live-tested evidence.
 | `init`, static `validate`, local `doctor` | Shipped in source |
 | Qoder CLI 1.1.x read-only, stateless `run --engine qoder` adapter | Shipped in source; live model entitlement not tested |
 | Claude Code `>=2.1.214 <2.2.0`, Qwen Code `0.17.1`, CodeBuddy Code `2.106.4` context-only adapters | Shipped in source; live model entitlement not tested |
+| Signed tasks, package digest/snapshot, lease fencing, event chain and Runner-signed receipt | Shipped as a V0.3 source preview |
+| Long-running Runner network process, device auth and durable replay/reconnect | Not shipped; private deployment layer required |
 | Codex CLI run adapter | Probe-only; blocked on reliable removal of every model-visible built-in tool |
 | Agent-native `service start` with channels, queue and audit | Not shipped; next phase |
 | `standalone-v1` profile and channel/source/model/tool registry | Shipped; compatibility path |
@@ -308,7 +333,7 @@ container, live DWS, and not-yet-live-tested evidence.
 | Human escalation and authorized verified FAQ feedback | Shipped |
 | Project-assistant and operations profiles | Planned |
 | Write tools and approval workflow | Planned; disabled in the first release |
-| Marketplace, pricing and hosted multi-tenant service | Separate future platform; not shipped in this repository or the `0.2.0` CLI candidate |
+| Marketplace, pricing, trusted metering and settlement | Separate private platform; intentionally outside this framework repository |
 
 ## Relationship to `mem`
 
