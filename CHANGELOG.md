@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-04
+
+This source candidate adds the publisher-owned Runner execution boundary. It
+has not been published to npm, GHCR or GitHub Releases.
+
+### Added
+
+- Added the cross-repository `digital-employee.runner-protocol.v1` contract:
+  Ed25519 task/receipt envelopes, strict canonical payloads, lease fencing,
+  bounded hash-chained events, Runner-attested usage and shared golden vectors.
+- Added deterministic employee-package digests and per-run sealed local
+  snapshots so the bytes verified are the bytes passed to the Agent Host.
+- Added a required replay-guard port, process-local preview implementation,
+  signed-renewal lease state and a one-shot Runner executor for a publisher or
+  operator-owned machine.
+- Added package identity checks before and after Host preflight/execution,
+  lease-aware cancellation, bounded normalized event transport and signed
+  completion receipts.
+
+### Security
+
+- Runner tasks can resolve packages by immutable identity only; a platform
+  payload cannot provide a local path, command, module or Agent credential.
+- Runner receipts prove provenance and integrity only. They deliberately carry
+  no Credit or price authority and cannot make self-reported usage billable.
+- All validity windows are half-open, bounded clock skew is explicit, signed
+  renewals preserve the full task identity, and late executions cannot produce
+  an acceptable receipt.
+
 ## [0.2.0] - 2026-08-04
 
 This release is the Agent-native CLI and Host Adapter release. The published

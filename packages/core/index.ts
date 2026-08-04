@@ -54,6 +54,11 @@ export {
 } from "./src/employee-package.js"
 export type { EmployeePackageManifest } from "./src/employee-package.js"
 export {
+  EMPLOYEE_PACKAGE_DIGEST_DOMAIN,
+  computeEmployeePackageDigest,
+} from "./src/employee-package-digest.js"
+export type { EmployeePackageDigestEntry } from "./src/employee-package-digest.js"
+export {
   EMPLOYEE_MCP_SCHEMA_VERSION,
   validateEmployeeMcpManifest,
 } from "./src/employee-mcp.js"
@@ -80,6 +85,64 @@ export {
   tokenize,
 } from "./src/lexical-retriever.js"
 export { SessionStore } from "./src/session-store.js"
+export {
+  RUNNER_EVENT_DOMAIN,
+  RUNNER_EVENT_GENESIS_DIGEST,
+  MAX_RUNNER_ATTEMPTS,
+  MAX_RUNNER_CLOCK_SKEW_MS,
+  MIN_RUNNER_LEASE_MILLISECONDS,
+  RUNNER_PROTOCOL_VERSION,
+  RUNNER_RECEIPT_DOMAIN,
+  RUNNER_SIGNATURE_ALGORITHM,
+  RUNNER_TASK_DOMAIN,
+  RunnerProtocolError,
+  canonicalRunnerJson,
+  createRunnerEvent,
+  decodeOpaqueJson,
+  encodeOpaqueJson,
+  hashRunnerEvent,
+  runnerPrivateKey,
+  runnerPublicKey,
+  signRunnerEnvelope,
+  signRunnerReceipt,
+  signRunnerTask,
+  validateRunnerEvent,
+  validateRunnerReceipt,
+  validateRunnerTask,
+  validateSignedEnvelope,
+  verifyRunnerEnvelope,
+  verifyRunnerEventChain,
+  verifyRunnerExecutionBundle,
+  verifyRunnerReceipt,
+  verifyRunnerTask,
+} from "./src/runner-protocol.js"
+export { InMemoryRunnerReplayGuard } from "./src/runner-replay-guard.js"
+export type {
+  InMemoryRunnerReplayGuardOptions,
+  RunnerReplayClaim,
+  RunnerReplayGuardPort,
+} from "./src/runner-replay-guard.js"
+export {
+  RUNNER_LEASE_SAFETY_MARGIN_MS,
+  RunnerLeaseError,
+  RunnerLeaseState,
+} from "./src/runner-lease.js"
+export type {
+  CreateRunnerLeaseStateOptions,
+  RunnerLeaseErrorCode,
+} from "./src/runner-lease.js"
+export type {
+  OpaqueData,
+  RunnerEvent,
+  RunnerEventChainIdentity,
+  RunnerOutcome,
+  RunnerProtocolErrorCode,
+  RunnerReceiptPayload,
+  RunnerTaskPayload,
+  RunnerUsageSummary,
+  SignedEnvelope,
+  VerifiedRunnerExecutionBundle,
+} from "./src/runner-protocol.js"
 export {
   EMPLOYEE_PROFILE_SCHEMA_VERSION,
   RUNTIME_API_VERSION,

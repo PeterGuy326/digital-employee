@@ -17,3 +17,33 @@ export type {
   RunEmployeePackageOptions,
 } from "./agent-run.js"
 export { createBuiltInAgentHostRegistry } from "./agent-host-registry.js"
+export {
+  computeEmployeePackageDirectoryDigest,
+  createSealedEmployeePackageSnapshot,
+} from "./employee-package.js"
+export type { SealedEmployeePackageSnapshot } from "./employee-package.js"
+export {
+  RunnerExecutionError,
+  executeOneShotRunnerTask,
+} from "./runner-executor.js"
+export type {
+  LocalEmployeePackageRequest,
+  OneShotRunnerExecution,
+  OneShotRunnerExecutorOptions,
+  RunnerExecutionErrorCode,
+} from "./runner-executor.js"
+export {
+  RUNNER_LEASE_SAFETY_MARGIN_MS,
+  RunnerLeaseError,
+  RunnerLeaseState,
+} from "../../packages/core/src/runner-lease.js"
+export type {
+  CreateRunnerLeaseStateOptions,
+  RunnerLeaseErrorCode,
+} from "../../packages/core/src/runner-lease.js"
+export { InMemoryRunnerReplayGuard } from "../../packages/core/src/runner-replay-guard.js"
+export type {
+  InMemoryRunnerReplayGuardOptions,
+  RunnerReplayClaim,
+  RunnerReplayGuardPort,
+} from "../../packages/core/src/runner-replay-guard.js"
