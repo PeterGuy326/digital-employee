@@ -50,13 +50,14 @@ Agent-native usage:
   digital-employee doctor [--engine claude-code|qoder|codex|qwen-code|codebuddy] [--json]
   digital-employee init <directory> [--name employee-name] [--author author]
   digital-employee validate [directory] [--engine claude-code|qoder|codex|qwen-code|codebuddy] [--json]
-  digital-employee run [directory] --engine qoder (--stdin | --input-file path | --question "..." | --input '{"message":"..."}') [--json]
+  digital-employee run [directory] --engine claude-code|qoder|qwen-code|codebuddy (--stdin | --input-file path | --question "..." | --input '{"message":"..."}') [--json]
 
 Standalone-v1 compatibility:
   digital-employee legacy <ask|sync|start|serve> [options]
 
 Agent host diagnosis may execute a bounded local '<host> --version' probe.
 It does not attempt authentication, invoke a model, execute tools, or start an Agent run.
+Codex is probe-only.
 The compatibility namespace uses the frozen model/retriever loop, not an Agent host.
 `;
 }
