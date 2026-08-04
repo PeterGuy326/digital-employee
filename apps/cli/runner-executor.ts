@@ -49,9 +49,6 @@ export type RunnerExecutionErrorCode =
   | "RUNNER_TASK_REPLAYED"
   | "RUNNER_REPLAY_GUARD_FAILED"
   | "RUNNER_LOCAL_PACKAGE_UNAVAILABLE"
-  | "RUNNER_PACKAGE_IDENTITY_MISMATCH"
-  | "RUNNER_PACKAGE_DIGEST_MISMATCH"
-  | "RUNNER_INPUT_UNSUPPORTED"
   | "RUNNER_EVENT_LIMIT_EXCEEDED"
 
 export class RunnerExecutionError extends CoreError {
@@ -278,6 +275,10 @@ function failedOutcome(errorCode: string): RunnerOutcome {
 /**
  * Executes exactly one platform-signed task on the publisher's own machine.
  * It performs no pull/heartbeat transport and exposes no inbound endpoint.
+ * Signature, identity, lease and replay failures reject before execution.
+ * After the nonce is consumed, deterministic package/input/Host failures
+ * resolve with a Runner-signed non-success receipt so the platform receives an
+ * auditable terminal outcome and must not retry the same nonce.
  */
 export async function executeOneShotRunnerTask(
   inputOptions: OneShotRunnerExecutorOptions,

@@ -28,6 +28,13 @@ V0.3 的目标链路是：
 8. 平台验证当前 attempt、fencing、Runner key、事件链和回执，只把任务推进到待核验。
    独立 `UsageVerifier` 通过后，平台才从不可变 Quote 计算 Credit 并结算。
 
+平台接收端的固定顺序是：从可信注册表解析平台与 Runner 公钥，验证平台 task envelope，
+验证 Runner receipt envelope，校验事件链以及身份/时间绑定，再交给独立
+`UsageVerifier`，最后按不可变 Quote 结算 Credit。公开的
+`verifyRunnerExecutionBundle()` 要求两个签名 envelope 和两把可信注册表公钥，并完成
+前三步；它不接受裸 task/receipt。Runner 签名只证明来源和完整性，自报 usage 不能直接
+计费。
+
 ## 当前可嵌入接口
 
 构建产物通过 `@fullstack-ai-infra/digital-employee/host-runtime` 暴露：
@@ -38,6 +45,10 @@ V0.3 的目标链路是：
 - `executeOneShotRunnerTask()`：验证并执行一个任务，生成事件链和签名回执；
 - `RunnerReplayGuardPort`：部署方必须提供的原子防重放端口；
 - `InMemoryRunnerReplayGuard`：只用于单进程预览，重启后不安全。
+
+`executeOneShotRunnerTask()` 在签名、身份、lease 或 replay 等前置失败时 reject。nonce
+被原子消费后，包身份/摘要、输入或 Host 的确定性失败会正常 resolve，并携带 Runner
+签名的失败回执；平台据此结束 attempt，不得用同一个 nonce 重试。
 
 长期 Runner 的传输层应把平台 API 映射为下面的调用关系，不能把平台返回的路径、命令
 或凭证传进执行器：

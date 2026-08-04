@@ -384,41 +384,78 @@ test("wrong keys, identities, expiry, and lease expiry are rejected before local
   )
 })
 
-test("package digest mismatch and host failures produce signed non-success receipts", async () => {
+test("post-claim package/input and Host failures produce signed non-success receipts", async () => {
   const target = await fixture()
-  let runCalled = false
-  const mismatchedTask = {
-    ...target.task,
-    employee: {
-      ...target.task.employee,
-      packageDigest: `sha256:${"f".repeat(64)}`,
+  const deterministicFailures: Array<{
+    task: RunnerTaskPayload
+    errorCode: string
+  }> = [
+    {
+      task: {
+        ...target.task,
+        employee: { ...target.task.employee, id: "different-agent" },
+        nonce: Buffer.alloc(16, 5).toString("base64url"),
+      },
+      errorCode: "runner_package_identity_mismatch",
     },
-    nonce: Buffer.alloc(16, 5).toString("base64url"),
-  }
-  const mismatch = await executeOneShotRunnerTask({
-    taskEnvelope: signRunnerTask({
-      task: mismatchedTask,
-      keyId: "platform-key-1",
-      privateKey: target.platform.privateKey,
-    }),
-    resolvePlatformPublicKey: () => target.platform.publicKey,
-    runnerId: "runner-1",
-    sellerId: "seller-1",
-    resolveLocalPackage: () => target.directory,
-    hostRegistry: registryFor({ onRun: () => (runCalled = true) }),
-    replayGuard: new InMemoryRunnerReplayGuard({
+    {
+      task: {
+        ...target.task,
+        employee: {
+          ...target.task.employee,
+          packageDigest: `sha256:${"f".repeat(64)}`,
+        },
+        nonce: Buffer.alloc(16, 6).toString("base64url"),
+      },
+      errorCode: "runner_package_digest_mismatch",
+    },
+    {
+      task: {
+        ...target.task,
+        input: { mediaType: "text/plain", encoding: "base64url", data: "" },
+        nonce: Buffer.alloc(16, 7).toString("base64url"),
+      },
+      errorCode: "runner_input_unsupported",
+    },
+  ]
+
+  for (const failure of deterministicFailures) {
+    let runCalled = false
+    const replayGuard = new InMemoryRunnerReplayGuard({
       clock: () => new Date("2026-08-04T00:00:01.000Z"),
-    }),
-    receiptKeyId: "runner-key-1",
-    receiptPrivateKey: target.runner.privateKey,
-    clock: () => new Date("2026-08-04T00:00:01.000Z"),
-  })
-  assert.deepEqual(mismatch.receipt.outcome, {
-    status: "failed",
-    errorCode: "runner_package_digest_mismatch",
-  })
-  assert.equal(runCalled, false)
-  assert.equal(mismatch.events.length, 0)
+    })
+    const options = {
+      taskEnvelope: signRunnerTask({
+        task: failure.task,
+        keyId: "platform-key-1",
+        privateKey: target.platform.privateKey,
+      }),
+      resolvePlatformPublicKey: () => target.platform.publicKey,
+      runnerId: "runner-1",
+      sellerId: "seller-1",
+      resolveLocalPackage: () => target.directory,
+      hostRegistry: registryFor({ onRun: () => (runCalled = true) }),
+      replayGuard,
+      receiptKeyId: "runner-key-1",
+      receiptPrivateKey: target.runner.privateKey,
+      clock: () => new Date("2026-08-04T00:00:01.000Z"),
+    }
+    const result = await executeOneShotRunnerTask(options)
+    const signedReceipt = verifyRunnerReceipt({
+      envelope: result.signedReceipt,
+      publicKey: target.runner.publicKey,
+    })
+    assert.deepEqual(signedReceipt.outcome, {
+      status: "failed",
+      errorCode: failure.errorCode,
+    })
+    assert.equal(runCalled, false)
+    assert.equal(result.events.length, 0)
+    await assert.rejects(
+      () => executeOneShotRunnerTask(options),
+      (error) => code(error) === "RUNNER_TASK_REPLAYED",
+    )
+  }
 
   const failed = await executeOneShotRunnerTask({
     taskEnvelope: target.envelope,

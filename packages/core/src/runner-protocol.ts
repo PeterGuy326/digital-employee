@@ -1218,19 +1218,14 @@ export function verifyRunnerReceipt(options: {
   return receipt
 }
 
-/**
- * Recomputes the independent event chain and binds it to a task and receipt.
- * Runner signatures prove origin/integrity only; billing trust remains a
- * separate platform UsageVerifier decision.
- */
-export function verifyRunnerExecutionBundle(options: {
-  task: unknown
+function bindRunnerExecutionBundle(options: {
+  task: RunnerTaskPayload
   events: readonly unknown[]
-  receipt: unknown
+  receipt: RunnerReceiptPayload
   observedAt: string
 }): VerifiedRunnerExecutionBundle {
-  const task = validateRunnerTask(options.task)
-  const receipt = validateRunnerReceipt(options.receipt)
+  const task = options.task
+  const receipt = options.receipt
   const observedAt = timestamp(
     options.observedAt,
     "RUNNER_RECEIPT_INVALID",
@@ -1297,4 +1292,35 @@ export function verifyRunnerExecutionBundle(options: {
     previousTimestamp = eventTimestamp
   }
   return Object.freeze({ task, events: chain.events, receipt })
+}
+
+/**
+ * Verifies both signed envelopes, then recomputes the independent event chain
+ * and binds it to the verified task and receipt. Public keys must come from
+ * trusted platform and Runner registries, never from the submitted bundle.
+ * Signatures prove origin/integrity only; billing trust remains a separate
+ * platform UsageVerifier decision.
+ */
+export function verifyRunnerExecutionBundle(options: {
+  taskEnvelope: unknown
+  platformPublicKey: KeyLike
+  events: readonly unknown[]
+  receiptEnvelope: unknown
+  runnerPublicKey: KeyLike
+  observedAt: string
+}): VerifiedRunnerExecutionBundle {
+  const task = verifyRunnerTask({
+    envelope: options.taskEnvelope,
+    publicKey: options.platformPublicKey,
+  })
+  const receipt = verifyRunnerReceipt({
+    envelope: options.receiptEnvelope,
+    publicKey: options.runnerPublicKey,
+  })
+  return bindRunnerExecutionBundle({
+    task,
+    events: options.events,
+    receipt,
+    observedAt: options.observedAt,
+  })
 }

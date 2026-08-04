@@ -467,25 +467,42 @@ test("execution bundles bind task, chain, receipt, lease, and clock skew", () =>
     eventCount: 1,
     finalEventDigest: event.digest,
   }
-  const verified = verifyRunnerExecutionBundle({
-    task: bundleTask,
-    events: [event],
-    receipt: bundleReceipt,
-    observedAt: "2026-08-04T00:00:03.000Z",
-  })
+  const verifyBundle = (
+    options: {
+      task?: RunnerTaskPayload
+      events?: readonly unknown[]
+      receipt?: RunnerReceiptPayload
+      observedAt?: string
+    } = {},
+  ) => {
+    const signedTask = options.task ?? bundleTask
+    const signedReceipt = options.receipt ?? bundleReceipt
+    return verifyRunnerExecutionBundle({
+      taskEnvelope: signRunnerTask({
+        task: signedTask,
+        keyId: "platform-key-1",
+        privateKey: RFC8032_PRIVATE_KEY,
+      }),
+      platformPublicKey: RFC8032_PUBLIC_KEY,
+      events: options.events ?? [event],
+      receiptEnvelope: signRunnerReceipt({
+        receipt: signedReceipt,
+        keyId: "runner-key-1",
+        privateKey: RFC8032_PRIVATE_KEY,
+      }),
+      runnerPublicKey: RFC8032_PUBLIC_KEY,
+      observedAt: options.observedAt ?? "2026-08-04T00:00:03.000Z",
+    })
+  }
+  const verified = verifyBundle()
   assert.equal(verified.events[0]?.digest, event.digest)
   assert.throws(() =>
-    verifyRunnerExecutionBundle({
-      task: bundleTask,
-      events: [event],
+    verifyBundle({
       receipt: { ...bundleReceipt, runnerId: "foreign-runner" },
-      observedAt: "2026-08-04T00:00:03.000Z",
     }),
   )
   assert.throws(() =>
-    verifyRunnerExecutionBundle({
-      task: bundleTask,
-      events: [event],
+    verifyBundle({
       receipt: {
         ...bundleReceipt,
         completedAt: bundleTask.leaseExpiresAt,
@@ -499,8 +516,7 @@ test("execution bundles bind task, chain, receipt, lease, and clock skew", () =>
     timestamp: "2026-08-04T00:00:33.000Z",
   })
   assert.doesNotThrow(() =>
-    verifyRunnerExecutionBundle({
-      task: bundleTask,
+    verifyBundle({
       events: [skewAcceptedEvent],
       receipt: {
         ...bundleReceipt,
@@ -515,8 +531,7 @@ test("execution bundles bind task, chain, receipt, lease, and clock skew", () =>
     timestamp: "2026-08-04T00:00:34.001Z",
   })
   assert.throws(() =>
-    verifyRunnerExecutionBundle({
-      task: bundleTask,
+    verifyBundle({
       events: [futureEvent],
       receipt: {
         ...bundleReceipt,
@@ -524,6 +539,65 @@ test("execution bundles bind task, chain, receipt, lease, and clock skew", () =>
         finalEventDigest: futureEvent.digest,
       },
       observedAt: "2026-08-04T00:00:04.000Z",
+    }),
+  )
+})
+
+test("execution bundles require trusted platform and Runner signatures", () => {
+  const bundleTask = task()
+  const bundleReceipt = receipt({
+    taskId: bundleTask.taskId,
+    runId: bundleTask.runId,
+    attempt: bundleTask.attempt,
+    fencingToken: bundleTask.fencingToken,
+    leaseId: bundleTask.leaseId,
+    quoteId: bundleTask.quoteId,
+    reservationId: bundleTask.reservationId,
+    sellerId: bundleTask.sellerId,
+    runnerId: bundleTask.runnerId,
+    employee: bundleTask.employee,
+    engine: bundleTask.engine,
+    startedAt: "2026-08-04T00:00:01.000Z",
+    completedAt: "2026-08-04T00:00:02.000Z",
+  })
+  const taskEnvelope = signRunnerTask({
+    task: bundleTask,
+    keyId: "platform-key-1",
+    privateKey: RFC8032_PRIVATE_KEY,
+  })
+  const receiptEnvelope = signRunnerReceipt({
+    receipt: bundleReceipt,
+    keyId: "runner-key-1",
+    privateKey: RFC8032_PRIVATE_KEY,
+  })
+  const wrongKey = generateKeyPairSync("ed25519").publicKey
+  const options = {
+    taskEnvelope,
+    platformPublicKey: RFC8032_PUBLIC_KEY,
+    events: [],
+    receiptEnvelope,
+    runnerPublicKey: RFC8032_PUBLIC_KEY,
+    observedAt: "2026-08-04T00:00:03.000Z",
+  }
+
+  assert.doesNotThrow(() => verifyRunnerExecutionBundle(options))
+  assert.throws(() =>
+    verifyRunnerExecutionBundle({ ...options, platformPublicKey: wrongKey }),
+  )
+  assert.throws(() =>
+    verifyRunnerExecutionBundle({ ...options, runnerPublicKey: wrongKey }),
+  )
+  assert.throws(() =>
+    verifyRunnerExecutionBundle({ ...options, taskEnvelope: bundleTask }),
+  )
+  assert.throws(() =>
+    verifyRunnerExecutionBundle({ ...options, receiptEnvelope: bundleReceipt }),
+  )
+  assert.throws(() =>
+    verifyRunnerExecutionBundle({
+      ...options,
+      taskEnvelope: receiptEnvelope,
+      receiptEnvelope: taskEnvelope,
     }),
   )
 })
