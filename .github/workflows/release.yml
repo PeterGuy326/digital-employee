@@ -21,7 +21,10 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 24
+          # Node 24's experimental test coverage reporter can end with a JSON
+          # aggregation error after every test passes. Keep release coverage on
+          # the repository-supported Node 22 line; normal CI still tests Node 24.
+          node-version: 22
           package-manager-cache: false
       - run: npm ci
       - run: npm run check

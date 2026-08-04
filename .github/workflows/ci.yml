@@ -16,21 +16,34 @@ jobs:
         node-version:
           - 20
           - 22
+          - 24
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
-          cache: npm
+          package-manager-cache: false
       - run: npm ci
       - run: npm run check
       - run: npm audit --omit=dev --audit-level=high
 
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:coverage
+
   container:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: docker build --tag digital-employee:ci .
       - name: Verify default Agent-native entry point
         run: docker run --rm digital-employee:ci | grep --fixed-strings "Agent-native usage:"

@@ -124,7 +124,12 @@ fixtures in this repository:
 - Qoder CLI 1.1.x receives a per-run minimum read-only file projection. Its
   isolated SDK-process configuration restricts native tools to the exact
   `Read/Grep/Glob` set when local assets are present and requires empty MCP,
-  Skill and plugin attestations.
+  Skill and plugin attestations. Assistant text is buffered until successful
+  process and credential cleanup, then scrubbed as one value using the exact
+  service credential. Tool values are scrubbed before truncation,
+  credential-bearing tool identifiers and keys are rejected, and schema-bound
+  structured output that would require credential or pattern redaction fails
+  closed.
 - Claude Code `>=2.1.214 <2.2.0`, Qwen Code `0.17.1` and CodeBuddy Code
   `2.106.4` are context-only. An adapter reads only manifest-selected,
   policy-allowed, bounded UTF-8 regular files, seals their path, length, digest
