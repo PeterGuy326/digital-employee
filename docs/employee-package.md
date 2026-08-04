@@ -64,8 +64,8 @@ CLI 1.1.x receives a minimum read-only projection. Claude Code
 a sealed, bounded UTF-8 value containing manifest-selected assets and run with
 empty isolated working, home and configuration directories. All four use a new
 stateless session, validate the exact runtime tool/MCP/plugin/Skill surface with
-Adapter-specific deterministic fixtures, and
-reject MCP, attachments, resume, writes and approval callbacks. None is the
+Adapter-specific deterministic fixtures, and reject MCP, attachments, resume,
+writes and approval callbacks. None is the
 long-running employee service used for marketplace rental, and live model
 entitlement has not been tested. These fixtures are not a reusable third-party
 certification harness.

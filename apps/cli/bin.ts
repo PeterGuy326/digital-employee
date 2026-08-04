@@ -57,7 +57,7 @@ Standalone-v1 compatibility:
 
 Agent host diagnosis may execute a bounded local '<host> --version' probe.
 It does not attempt authentication, invoke a model, execute tools, or start an Agent run.
-Codex remains probe-only.
+Codex is probe-only.
 The compatibility namespace uses the frozen model/retriever loop, not an Agent host.
 `;
 }

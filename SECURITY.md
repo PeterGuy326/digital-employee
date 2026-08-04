@@ -105,10 +105,10 @@ sandbox.
 
 Native stream messages are validated before normalized events are forwarded.
 Once a protocol or runtime-policy mismatch is detected, buffered output is
-discarded and only the post-cleanup failed terminal is emitted. Automated
-conformance fixtures do not establish live model entitlement, provider terms or
-multi-tenant isolation; no live model request was used for the current
-verification claim.
+discarded and only the post-cleanup failed terminal is emitted.
+Adapter-specific deterministic fixtures do not establish live model
+entitlement, provider terms or multi-tenant isolation; no live model request
+was used for the current verification claim.
 
 ## Supported versions
 

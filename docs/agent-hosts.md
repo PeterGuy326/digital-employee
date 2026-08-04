@@ -10,7 +10,7 @@
 
 当前源码中有四条版本锁定的 **runnable** 路径：Qoder CLI 1.1.x、Claude Code `>=2.1.214 <2.2.0`、Qwen Code `0.17.1` 和 CodeBuddy Code `2.106.4`。它们都是 one-shot、无状态、POSIX 本机/单租户技术预览；Qoder 只获得最小只读文件投影，另外三个是不暴露原生工具的 context-only Adapter。四条路径都不支持 MCP、附件、会话恢复、写工具或审批回调，也都没有使用真实模型权益验收。Windows 因尚无经过验证的 Job Object 进程树清理而 fail closed。Codex 仍是 **probe-only**：Codex CLI 0.146.0 无法可靠移除所有模型可见的内建工具，其中包括 `apply_patch`。
 
-官方产品文档只能证明某个宿主值得适配，不能把 `documented` 提升为本仓库的 `supported`。只有版本锁定、Adapter 实现和一致性测试全部通过后，一项能力才能参与运行前兼容性判断。
+官方产品文档只能证明某个宿主值得适配，不能把 `documented` 提升为本仓库的 `supported`。只有版本锁定、Adapter 实现和仓库内 Adapter 专用确定性 fixture 全部通过后，一项能力才能参与运行前兼容性判断。
 
 这里的 **probe-only** 不是“不启动任何进程”，而是“没有可启动模型或 Agent loop 的 runnable Adapter”。`doctor` 只会用过滤后的环境、固定 `--version` 参数和 10 秒超时执行受限版本探测；它不会验证登录、发起模型调用或执行工具。
 
@@ -43,7 +43,7 @@
 
 ### 1. Verified built-in Adapter
 
-内置 Adapter 由本仓库维护，进入发布物，并对明确的 Host 版本范围做一致性测试。它必须：
+内置 Adapter 由本仓库维护，进入发布物，并用仓库内 Adapter 专用确定性 fixture 覆盖明确的 Host 版本范围。它必须：
 
 - 把宿主原生事件完整映射为 `agent-host.v1`，且每次运行只有一个可信终态；
 - 在信任任何模型输出前验证真实工具集合、目录、网络、MCP、Skill/插件加载状态，并在本地验证输出契约；
