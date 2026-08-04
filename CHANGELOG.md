@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Security
+
+- Qoder assistant text is now buffered until successful process and cleanup
+  completion, then scrubbed as one value with the exact service credential.
+  This prevents secrets split across native stream chunks from escaping in
+  standard events. Tool input values are scrubbed before truncation,
+  credential-bearing tool identifiers and keys are rejected, and schema-bound
+  structured output that would require credential or pattern redaction fails
+  closed.
+
 ## [0.3.0] - 2026-08-04
 
 This source candidate adds the publisher-owned Runner execution boundary. It

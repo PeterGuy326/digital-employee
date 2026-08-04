@@ -76,6 +76,15 @@ async function writeCapture() {
   )
 }
 
+async function readCredential() {
+  const authPayloadPath = process.env.QODER_SDK_AUTH_PAYLOAD_FILE
+  const payload = JSON.parse(await readFile(authPayloadPath, "utf8"))
+  if (typeof payload.accessToken !== "string" || !payload.accessToken) {
+    throw new Error("fixture credential missing")
+  }
+  return payload.accessToken
+}
+
 const init = {
   type: "system",
   subtype: "init",
@@ -135,6 +144,17 @@ async function executeRun() {
     await new Promise(() => {})
   }
 
+  const credential = mode.includes("credential")
+    ? await readCredential()
+    : undefined
+  const toolUseId = mode === "tool-id-credential" ? credential : "tool-1"
+  const toolInput =
+    mode === "tool-input-credential"
+      ? { note: credential }
+      : mode === "tool-key-credential"
+        ? { [`${"x".repeat(250)}${credential}`]: "unsafe" }
+        : { file_path: "knowledge/README.md" }
+
   emit({
     type: "assistant",
     session_id: sessionId,
@@ -142,9 +162,9 @@ async function executeRun() {
       content: [
         {
           type: "tool_use",
-          id: "tool-1",
+          id: toolUseId,
           name: "Read",
-          input: { file_path: "knowledge/README.md" },
+          input: toolInput,
         },
       ],
     },
@@ -156,7 +176,7 @@ async function executeRun() {
       content: [
         {
           type: "tool_result",
-          tool_use_id: "tool-1",
+          tool_use_id: toolUseId,
           is_error: false,
           content: "approved knowledge",
         },
@@ -170,6 +190,36 @@ async function executeRun() {
       message: {
         content: [{ type: "text", text: "api_key=fixture-secret" }],
       },
+    })
+  } else if (mode === "snapshot-split-credential") {
+    emit({
+      type: "assistant",
+      session_id: sessionId,
+      message: { content: [{ type: "text", text: "api_key=" }] },
+    })
+    emit({
+      type: "assistant",
+      session_id: sessionId,
+      message: {
+        content: [{ type: "text", text: `api_key=${credential}` }],
+      },
+    })
+  } else if (
+    mode === "stream-split-credential" ||
+    mode === "stream-credential-result-error"
+  ) {
+    for (const text of ["Bearer ", credential]) {
+      emit({
+        type: "stream_event",
+        session_id: sessionId,
+        event: { delta: { type: "text_delta", text } },
+      })
+    }
+  } else if (mode === "stream-bare-credential") {
+    emit({
+      type: "stream_event",
+      session_id: sessionId,
+      event: { delta: { type: "text_delta", text: credential } },
     })
   } else {
     emit({
@@ -186,16 +236,20 @@ async function executeRun() {
       },
     })
   }
-  const output = JSON.stringify({
+  const outputValue = {
     status: "answered",
-    answer: "fixture answer",
+    answer: mode === "output-value-credential" ? credential : "fixture answer",
     citations: [{ label: "Approved", uri: "knowledge/README.md" }],
-  })
+    ...(mode === "output-key-credential" ? { [credential]: "unsafe" } : {}),
+  }
+  const output = JSON.stringify(outputValue)
+  const resultError =
+    mode === "result-error" || mode === "stream-credential-result-error"
   const result = {
     type: "result",
     session_id: sessionId,
-    subtype: mode === "result-error" ? "error_during_execution" : "success",
-    is_error: mode === "result-error",
+    subtype: resultError ? "error_during_execution" : "success",
+    is_error: resultError,
     result: mode === "invalid-output" ? `\`\`\`json\n${output}\n\`\`\`` : output,
   }
   emit(result)

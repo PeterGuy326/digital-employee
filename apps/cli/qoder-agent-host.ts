@@ -384,13 +384,27 @@ function qoderNativeTools(policy: AgentHostRunRequest["policy"]): string[] {
   ]
 }
 
+function scrubSecret(value: string, secret: string): string {
+  const replacement = secret && "[REDACTED]".includes(secret) ? "" : "[REDACTED]"
+  const scrubbed = secret ? value.split(secret).join(replacement) : value
+  const redacted = redactText(scrubbed)
+  return secret ? redacted.split(secret).join("") : redacted
+}
+
+function textNeedsScrubbing(value: string, secret: string): boolean {
+  return Boolean(secret && value.includes(secret)) || redactText(value) !== value
+}
+
 function safeToolValue(
   value: unknown,
+  secret: string,
   depth = 0,
   seen = new WeakSet<object>(),
 ): SafeValue {
   if (value === null || value === undefined) return value
-  if (typeof value === "string") return redactText(value.slice(0, 4_096))
+  if (typeof value === "string") {
+    return scrubSecret(value, secret).slice(0, 4_096)
+  }
   if (typeof value === "number") return Number.isFinite(value) ? value : null
   if (typeof value === "boolean") return value
   if (typeof value !== "object") return undefined
@@ -398,18 +412,25 @@ function safeToolValue(
   seen.add(value)
   if (Array.isArray(value)) {
     return value.slice(0, 64).map((entry) =>
-      safeToolValue(entry, depth + 1, seen),
+      safeToolValue(entry, secret, depth + 1, seen),
     )
   }
   const output: { [key: string]: SafeValue } = {}
   for (const [key, entry] of Object.entries(value).slice(0, 64)) {
+    if (textNeedsScrubbing(key, secret)) {
+      throw new QoderAdapterError("qoder_tool_input_sensitive_key_denied")
+    }
+    const safeKey = key.slice(0, 256)
+    if (Object.prototype.hasOwnProperty.call(output, safeKey)) {
+      throw new QoderAdapterError("qoder_tool_input_key_collision")
+    }
     const safe = /(?:authorization|cookie|password|secret|token|api[-_]?key)/i.test(
       key,
     )
       ? "[REDACTED]"
-      : safeToolValue(entry, depth + 1, seen)
+      : safeToolValue(entry, secret, depth + 1, seen)
     if (safe === undefined) continue
-    Object.defineProperty(output, key.slice(0, 256), {
+    Object.defineProperty(output, safeKey, {
       value: safe,
       enumerable: true,
       configurable: true,
@@ -417,6 +438,46 @@ function safeToolValue(
     })
   }
   return output
+}
+
+function scrubOutput(
+  value: SafeValue,
+  secret: string,
+  rejectChanges = false,
+  depth = 0,
+): SafeValue {
+  if (depth > 32) return "[Truncated]"
+  if (typeof value === "string") {
+    if (rejectChanges && textNeedsScrubbing(value, secret)) {
+      throw new QoderAdapterError("qoder_output_sensitive_value_denied")
+    }
+    const safe = scrubSecret(value, secret)
+    return safe
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) =>
+      scrubOutput(entry, secret, rejectChanges, depth + 1),
+    )
+  }
+  if (value && typeof value === "object") {
+    const output: { [key: string]: SafeValue } = {}
+    for (const [key, entry] of Object.entries(value)) {
+      if (
+        textNeedsScrubbing(key, secret) ||
+        Object.prototype.hasOwnProperty.call(output, key)
+      ) {
+        throw new QoderAdapterError("qoder_output_sensitive_key_denied")
+      }
+      Object.defineProperty(output, key, {
+        value: scrubOutput(entry, secret, rejectChanges, depth + 1),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      })
+    }
+    return output
+  }
+  return value
 }
 
 function normalizeOutputValue(
@@ -429,7 +490,7 @@ function normalizeOutputValue(
     throw new QoderAdapterError("qoder_output_too_complex")
   }
   if (value === null) return null
-  if (typeof value === "string") return redactText(value)
+  if (typeof value === "string") return value
   if (typeof value === "boolean") return value
   if (typeof value === "number") {
     if (!Number.isFinite(value)) {
@@ -752,6 +813,8 @@ export class QoderAgentHostAdapter implements AgentHostAdapter {
     this.activeRuns.set(request.runId, active)
     let runRoot: string | undefined
     let authPayloadPath: string | undefined
+    let credential = ""
+    let pendingAssistantText = ""
     let abortListener: (() => void) | undefined
     let deadlineTimer: NodeJS.Timeout | undefined
     let terminalEvent:
@@ -864,7 +927,7 @@ export class QoderAgentHostAdapter implements AgentHostAdapter {
       const settingsPath = path.join(configDirectory, "adapter-settings.json")
       const mcpPath = path.join(configDirectory, "empty-mcp.json")
       authPayloadPath = path.join(configDirectory, "auth-payload.json")
-      const credential = this.environment.QODER_PERSONAL_ACCESS_TOKEN?.trim()
+      credential = this.environment.QODER_PERSONAL_ACCESS_TOKEN?.trim() ?? ""
       if (!credential) {
         throw new QoderAdapterError("qoder_service_token_not_configured")
       }
@@ -1186,12 +1249,7 @@ export class QoderAgentHostAdapter implements AgentHostAdapter {
             }
             sawPartialText = true
             if (protocolCode || active.reason) continue
-            yield {
-              type: "assistant.delta",
-              runId: request.runId,
-              timestamp: timestamp(),
-              text: redactText(delta.text),
-            }
+            pendingAssistantText += delta.text
           }
           continue
         }
@@ -1210,6 +1268,7 @@ export class QoderAgentHostAdapter implements AgentHostAdapter {
           const hasToolUse = blocks.some((block) => block?.type === "tool_use")
           const pendingEvents: AgentHostEvent[] = []
           const pendingToolNames = new Map<string, string>()
+          let pendingAssistantDelta = ""
           let nextAssistantSnapshot = assistantSnapshot
           if (hasToolUse) {
             for (const block of blocks) {
@@ -1226,6 +1285,10 @@ export class QoderAgentHostAdapter implements AgentHostAdapter {
                 protocolFailure("qoder_duplicate_tool_call")
                 break
               }
+              if (textNeedsScrubbing(block.id, credential)) {
+                protocolFailure("qoder_sensitive_tool_call_id_denied")
+                break
+              }
               pendingToolNames.set(block.id, block.name)
               pendingEvents.push({
                 type: "tool.started",
@@ -1234,7 +1297,7 @@ export class QoderAgentHostAdapter implements AgentHostAdapter {
                 toolCallId: block.id,
                 toolName: block.name,
                 ...(block.input !== undefined
-                  ? { input: safeToolValue(block.input) }
+                  ? { input: safeToolValue(block.input, credential) }
                   : {}),
               })
             }
@@ -1250,12 +1313,7 @@ export class QoderAgentHostAdapter implements AgentHostAdapter {
                 : block.text
               nextAssistantSnapshot = block.text
               if (delta) {
-                pendingEvents.push({
-                  type: "assistant.delta",
-                  runId: request.runId,
-                  timestamp: timestamp(),
-                  text: redactText(delta),
-                })
+                pendingAssistantDelta += delta
               }
             }
           }
@@ -1264,6 +1322,7 @@ export class QoderAgentHostAdapter implements AgentHostAdapter {
             toolNames.set(toolCallId, toolName)
           }
           assistantSnapshot = nextAssistantSnapshot
+          pendingAssistantText += pendingAssistantDelta
           for (const normalized of pendingEvents) {
             if (protocolCode || active.reason) break
             yield normalized
@@ -1373,9 +1432,10 @@ export class QoderAgentHostAdapter implements AgentHostAdapter {
       }
       let output: SafeValue
       try {
-        output = parseAndValidateOutput(
-          resultEvent!.result,
-          request.outputSchema,
+        output = scrubOutput(
+          parseAndValidateOutput(resultEvent!.result, request.outputSchema),
+          credential,
+          request.outputSchema !== undefined,
         )
       } catch (error) {
         const code =
@@ -1458,6 +1518,17 @@ export class QoderAgentHostAdapter implements AgentHostAdapter {
     const terminal =
       terminalEvent ??
       failedEvent(request.runId, timestamp(), "qoder_terminal_missing")
+    if (terminal.type === "run.completed") {
+      const safeAssistantText = scrubSecret(pendingAssistantText, credential)
+      if (safeAssistantText) {
+        yield {
+          type: "assistant.delta",
+          runId: request.runId,
+          timestamp: timestamp(),
+          text: safeAssistantText,
+        }
+      }
+    }
     yield { ...terminal, timestamp: timestamp() }
   }
 }

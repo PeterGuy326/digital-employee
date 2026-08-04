@@ -106,7 +106,11 @@ Qwen disables slash commands and pins its unreachable built-in agent catalog;
 CodeBuddy denies every built-in tool in the verified version because its empty
 `--tools` flag alone is insufficient. Qoder instead receives a minimum
 read-only file projection and must attest its exact read/search tool set plus
-empty MCP/Skill/plugin sets.
+empty MCP/Skill/plugin sets. Qoder assistant text is held until process and
+credential cleanup succeeds, then scrubbed as one value with the exact service
+credential. Tool values are scrubbed before truncation, credential-bearing tool
+identifiers and keys are rejected, and schema-bound structured output that
+would require credential or pattern redaction fails closed.
 
 These paths are local/single-tenant technical previews, not a marketplace-ready
 online employee service. All four reject MCP, attachments, session resume,

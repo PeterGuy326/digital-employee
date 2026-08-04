@@ -299,6 +299,213 @@ test("Qoder redacts both native stream and assistant snapshot deltas", async () 
   }
 })
 
+test("Qoder buffers and scrubs the actual credential across stream boundaries", async () => {
+  for (const [mode, expected] of [
+    ["stream-split-credential", "Bearer [REDACTED]"],
+    ["snapshot-split-credential", "api_key=[REDACTED]"],
+    ["stream-bare-credential", "[REDACTED]"],
+  ] as const) {
+    const parent = await mkdtemp(path.join(os.tmpdir(), `qoder-${mode}-`))
+    const request = await employeeRequest(parent, `run-${mode}`)
+    const events = await collect(adapter(parent, mode).run(request))
+    const deltas = events.filter(
+      (event): event is Extract<AgentHostEvent, { type: "assistant.delta" }> =>
+        event.type === "assistant.delta",
+    )
+
+    assert.equal(events.at(-1)?.type, "run.completed")
+    assert.deepEqual(deltas.map((event) => event.text), [expected])
+    assert.equal(JSON.stringify(events).includes("fixture-service-token"), false)
+  }
+})
+
+test("Qoder scrubs credentials from tool input and rejects sensitive keys and ids", async () => {
+  const inputParent = await mkdtemp(
+    path.join(os.tmpdir(), "qoder-tool-input-credential-"),
+  )
+  const inputRequest = await employeeRequest(
+    inputParent,
+    "run-tool-input-credential",
+  )
+  const inputEvents = await collect(
+    adapter(inputParent, "tool-input-credential").run(inputRequest),
+  )
+  const toolStarted = inputEvents.find((event) => event.type === "tool.started")
+
+  assert.equal(inputEvents.at(-1)?.type, "run.completed")
+  assert.deepEqual(
+    toolStarted?.type === "tool.started" && toolStarted.input,
+    { note: "[REDACTED]" },
+  )
+  assert.equal(
+    JSON.stringify(inputEvents).includes("fixture-service-token"),
+    false,
+  )
+
+  const idParent = await mkdtemp(
+    path.join(os.tmpdir(), "qoder-tool-id-credential-"),
+  )
+  const idRequest = await employeeRequest(idParent, "run-tool-id-credential")
+  const idEvents = await collect(
+    adapter(idParent, "tool-id-credential").run(idRequest),
+  )
+  const idTerminal = idEvents.at(-1)
+
+  assert.equal(idTerminal?.type, "run.failed")
+  assert.equal(
+    idTerminal?.type === "run.failed" && idTerminal.error.code,
+    "qoder_sensitive_tool_call_id_denied",
+  )
+  assert.equal(JSON.stringify(idEvents).includes("fixture-service-token"), false)
+
+  const keyParent = await mkdtemp(
+    path.join(os.tmpdir(), "qoder-tool-key-credential-"),
+  )
+  const keyRequest = await employeeRequest(keyParent, "run-tool-key-credential")
+  const keyEvents = await collect(
+    adapter(keyParent, "tool-key-credential").run(keyRequest),
+  )
+  const keyTerminal = keyEvents.at(-1)
+
+  assert.equal(keyTerminal?.type, "run.failed")
+  assert.equal(
+    keyTerminal?.type === "run.failed" && keyTerminal.error.code,
+    "qoder_tool_input_sensitive_key_denied",
+  )
+  assert.equal(JSON.stringify(keyEvents).includes("fixture-service-token"), false)
+})
+
+test("Qoder scrubs complete host values before applying event size bounds", async () => {
+  const parent = await mkdtemp(
+    path.join(os.tmpdir(), "qoder-long-tool-input-credential-"),
+  )
+  const request = await employeeRequest(
+    parent,
+    "run-long-tool-input-credential",
+  )
+  const credential = `qoder-${"x".repeat(5_000)}-tail`
+  const events = await collect(
+    adapter(parent, "tool-input-credential", undefined, 30_000, {
+      environment: {
+        PATH: process.env.PATH,
+        QODER_PERSONAL_ACCESS_TOKEN: credential,
+      },
+    }).run(request),
+  )
+  const toolStarted = events.find((event) => event.type === "tool.started")
+  const serialized = JSON.stringify(events)
+
+  assert.equal(events.at(-1)?.type, "run.completed")
+  assert.deepEqual(
+    toolStarted?.type === "tool.started" && toolStarted.input,
+    { note: "[REDACTED]" },
+  )
+  assert.equal(serialized.includes(credential), false)
+  assert.equal(serialized.includes(credential.slice(0, 4_096)), false)
+})
+
+test("Qoder does not confuse the actual credential with its redaction marker", async () => {
+  const credential = "[REDACTED]"
+  for (const [mode, expectedTerminal, expectedCode] of [
+    ["stream-bare-credential", "run.completed", undefined],
+    [
+      "output-value-credential",
+      "run.failed",
+      "qoder_output_sensitive_value_denied",
+    ],
+  ] as const) {
+    const parent = await mkdtemp(path.join(os.tmpdir(), `qoder-marker-${mode}-`))
+    const request = await employeeRequest(parent, `run-marker-${mode}`)
+    const events = await collect(
+      adapter(parent, mode, undefined, 30_000, {
+        environment: {
+          PATH: process.env.PATH,
+          QODER_PERSONAL_ACCESS_TOKEN: credential,
+        },
+      }).run(request),
+    )
+    const terminal = events.at(-1)
+
+    assert.equal(terminal?.type, expectedTerminal)
+    if (expectedCode) {
+      assert.equal(
+        terminal?.type === "run.failed" && terminal.error.code,
+        expectedCode,
+      )
+    }
+    assert.equal(JSON.stringify(events).includes(credential), false)
+  }
+})
+
+test("Qoder fails closed when structured output contains its credential", async () => {
+  for (const [mode, expectedCode] of [
+    ["output-value-credential", "qoder_output_sensitive_value_denied"],
+    ["output-key-credential", "qoder_output_sensitive_key_denied"],
+  ] as const) {
+    const parent = await mkdtemp(path.join(os.tmpdir(), `qoder-${mode}-`))
+    const request = await employeeRequest(parent, `run-${mode}`)
+    if (mode === "output-key-credential") {
+      request.outputSchema = {
+        type: "object",
+        additionalProperties: true,
+      }
+    }
+    const events = await collect(adapter(parent, mode).run(request))
+    const terminal = events.at(-1)
+
+    assert.equal(terminal?.type, "run.failed")
+    assert.equal(
+      terminal?.type === "run.failed" && terminal.error.code,
+      expectedCode,
+    )
+    assert.equal(JSON.stringify(events).includes("fixture-service-token"), false)
+  }
+
+  const parent = await mkdtemp(
+    path.join(os.tmpdir(), "qoder-unstructured-output-credential-"),
+  )
+  const request = await employeeRequest(
+    parent,
+    "run-unstructured-output-credential",
+  )
+  request.outputSchema = undefined
+  const events = await collect(
+    adapter(parent, "output-value-credential").run(request),
+  )
+  const terminal = events.at(-1)
+
+  assert.equal(terminal?.type, "run.completed")
+  assert.match(
+    terminal?.type === "run.completed" && typeof terminal.output === "string"
+      ? terminal.output
+      : "",
+    /\[REDACTED\]/,
+  )
+  assert.equal(JSON.stringify(events).includes("fixture-service-token"), false)
+})
+
+test("Qoder never flushes buffered credentials after a failed run", async () => {
+  const parent = await mkdtemp(
+    path.join(os.tmpdir(), "qoder-stream-credential-result-error-"),
+  )
+  const request = await employeeRequest(
+    parent,
+    "run-stream-credential-result-error",
+  )
+  const events = await collect(
+    adapter(parent, "stream-credential-result-error").run(request),
+  )
+  const terminal = events.at(-1)
+
+  assert.equal(events.some((event) => event.type === "assistant.delta"), false)
+  assert.equal(terminal?.type, "run.failed")
+  assert.equal(
+    terminal?.type === "run.failed" && terminal.error.code,
+    "qoder_execution_failed",
+  )
+  assert.equal(JSON.stringify(events).includes("fixture-service-token"), false)
+})
+
 for (const [mode, expectedCode] of [
   ["malformed", "qoder_stream_invalid_json"],
   ["policy-mismatch", "qoder_runtime_policy_mismatch"],
@@ -581,7 +788,7 @@ test("Qoder cleanup failure replaces success with an explicit failed terminal", 
   const parent = await mkdtemp(path.join(os.tmpdir(), "qoder-cleanup-failure-"))
   const request = await employeeRequest(parent, "run-cleanup-failure")
   let cleanupCalls = 0
-  const host = adapter(parent, "success", undefined, 10_000, {
+  const host = adapter(parent, "stream-split-credential", undefined, 10_000, {
     removeRunRoot: async () => {
       cleanupCalls += 1
       throw Object.assign(new Error("fixture cleanup failure"), { code: "EACCES" })
@@ -591,6 +798,8 @@ test("Qoder cleanup failure replaces success with an explicit failed terminal", 
   const events = await collect(host.run(request))
   assert.equal(cleanupCalls, 2)
   assert.equal(terminalEvents(events).length, 1)
+  assert.equal(events.some((event) => event.type === "assistant.delta"), false)
+  assert.equal(JSON.stringify(events).includes("fixture-service-token"), false)
   assert.equal(events.at(-1)?.type, "run.failed")
   const failed = events.at(-1)
   assert.equal(
