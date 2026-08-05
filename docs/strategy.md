@@ -21,10 +21,12 @@ this framework owns the package, adapter, policy and local execution boundary.
 Local create, validate and run workflows do not require a marketplace.
 
 `answer-agent` is the historical first employee use case, not the product
-definition. Its checked-in implementation belongs to `standalone-v1`; no
-Agent-native recipe is shipped yet, and delivering the first one is an M0
-outcome. `standalone-v1` is a compatibility path, not the target for new general
-Agent capabilities.
+definition. Its checked-in implementation belongs to `standalone-v1`. This
+Builder delivery provides only the bounded Agent-native `minimal-answer.v1` and
+`structured-action.v1` recipes for offline package/Schema fixture-contract
+conformance. They do not certify any model, Agent, Agent Host, MCP integration,
+live response or response quality. `standalone-v1` remains a compatibility
+path, not the target for new general Agent capabilities.
 
 ## North Star metric: Verified Local Employee Run
 

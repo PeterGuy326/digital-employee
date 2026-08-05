@@ -96,13 +96,22 @@ SKILL.md                      Role, trigger, workflow and escalation rules
 schemas/input.schema.json     Public task contract
 schemas/output.schema.json    Public result contract
 knowledge/                    Approved local knowledge
-evals/                        Portable behavior cases
+evals/                        Offline fixture contract cases
 ```
 
 MCP declarations can add document, drive, DWS, memory or business tools. Host
 files such as `AGENTS.md`, Claude/Qoder settings and command-line arguments are
 generated projections, not the canonical employee definition. See
 [the employee package contract](employee-package.md).
+
+The fixed contract eval asset is declared as `./evals/cases.json`. Its JSON has
+exact top-level `{schemaVersion,cases}` and case
+`{id,input,expectedOutput}` shapes; fixtures are checked only against the
+package input/output Schemas. The command neither invokes nor evaluates a
+model, Agent, Agent Host, MCP, online service, live response or response
+quality. Machine output uses `employee-eval-result.v1alpha1`; a passed contract
+eval exits `0`, while a package, contract or fixture-conformance failure
+returns a stable machine code and exits `1`.
 
 An employee may declare role-specific host capabilities, while security
 requirements are also derived from its policy. For example, read-only derives
@@ -126,11 +135,13 @@ events. Native event formats remain inside each adapter.
 
 The new Agent-host foundation ships these non-model commands:
 
-- `init`: creates a minimal host-neutral employee source package and never
-  overwrites an existing target;
+- `init --recipe minimal-answer.v1|structured-action.v1`: creates a versioned,
+  host-neutral employee source package and never overwrites an existing target;
 - `validate`: statically validates the manifest, Skill identity, declared
   files and JSON contracts; `--engine` also runs the selected adapter's
   model-free package/policy preflight and capability negotiation;
+- `eval [directory] [--json]`: performs offline fixture conformance
+  with stable `employee-eval-result.v1alpha1` output and exit `0|1` semantics;
 - `doctor`: performs a bounded local readiness probe for Claude Code, Qoder
   CLI, Codex, Qwen Code and CodeBuddy Code and reports separately whether an
   adapter is runnable.

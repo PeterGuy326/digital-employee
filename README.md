@@ -22,8 +22,8 @@ services belong to the private platform.
 `answer-agent` is the historical first employee use case: a read-only team
 support employee that answers with citations, refuses unsupported claims and
 escalates uncertainty to a human. Its checked-in implementation belongs to the
-`standalone-v1` compatibility path. No Agent-native recipe is shipped yet;
-delivering one is part of the M0 roadmap.
+`standalone-v1` compatibility path. The Agent-native builder now ships the
+versioned `minimal-answer.v1` and `structured-action.v1` public recipes.
 
 ```mermaid
 flowchart LR
@@ -38,20 +38,34 @@ flowchart LR
 
 ## Source-tree workflow
 
-The current source provides package scaffolding, static validation and local
-host diagnosis. None of these commands starts a model run:
+The current source provides package scaffolding, static validation, offline
+fixture conformance and local host diagnosis. None of these commands starts a
+model run:
 
 ```bash
 npm ci
 npm run build
 node ./dist/apps/cli/bin.js doctor
-node ./dist/apps/cli/bin.js init ../team-answer --author your-team
+node ./dist/apps/cli/bin.js init ../team-answer \
+  --recipe minimal-answer.v1 \
+  --author your-team
 node ./dist/apps/cli/bin.js validate ../team-answer
+node ./dist/apps/cli/bin.js eval ../team-answer --json
 node ./dist/apps/cli/bin.js doctor --engine qoder
 node ./dist/apps/cli/bin.js doctor --engine claude-code
 node ./dist/apps/cli/bin.js doctor --engine qwen-code
 node ./dist/apps/cli/bin.js doctor --engine codebuddy
 ```
+
+`init --recipe` accepts exactly `minimal-answer.v1` or
+`structured-action.v1`; omitting it defaults to `minimal-answer.v1`. The
+contract eval reads the declared `./evals/cases.json` with exact top-level
+`{schemaVersion,cases}` and case `{id,input,expectedOutput}` shapes, then checks
+the fixtures against the package Schemas. `--json` emits
+`employee-eval-result.v1alpha1` with status, machine code, optional employee
+identity, summary and ordered case results. A pass exits `0`; any package,
+contract or fixture failure exits `1`. It never invokes a model, Agent Host,
+MCP or online service.
 
 See the [portable employee package](docs/employee-package.md) and the
 [Agent-host boundary ADR](docs/decisions/0001-agent-host-boundary.md). The
