@@ -5,13 +5,16 @@ import {
   mkdtemp,
   open,
   readFile,
-  rename,
+  rmdir,
   rm,
+  unlink,
   writeFile,
 } from "node:fs/promises"
 import { constants as fsConstants } from "node:fs"
+import { randomBytes } from "node:crypto"
 import os from "node:os"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { Ajv2020 } from "ajv/dist/2020.js"
 import { parseDocument } from "yaml"
 
@@ -33,6 +36,34 @@ const MAX_ASSET_BYTES = 5 * 1024 * 1024
 const MAX_DECLARED_FILES = 512
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024
 const EMPLOYEE_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+
+export const EMPLOYEE_RECIPE_IDS = [
+  "minimal-answer.v1",
+  "structured-action.v1",
+] as const
+export type EmployeeRecipeId = (typeof EMPLOYEE_RECIPE_IDS)[number]
+export const DEFAULT_EMPLOYEE_RECIPE: EmployeeRecipeId = "minimal-answer.v1"
+
+const packageRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../..",
+)
+const EMPLOYEE_RECIPE_PACKAGES: Record<EmployeeRecipeId, string> = {
+  "minimal-answer.v1": path.join(
+    packageRoot,
+    "examples",
+    "recipes",
+    "minimal-answer.v1",
+    "minimal-answer",
+  ),
+  "structured-action.v1": path.join(
+    packageRoot,
+    "examples",
+    "recipes",
+    "structured-action.v1",
+    "structured-action",
+  ),
+}
 
 export interface EmployeePackageSummary {
   directory: string
@@ -60,6 +91,17 @@ export interface SealedEmployeePackageSnapshot {
 export interface CreateEmployeePackageOptions {
   name?: string
   author?: string
+  recipe?: string
+}
+
+/** @internal Coordinates deterministic publish-race tests. */
+export interface EmployeePackageCreationHooks {
+  beforePublish?: () => void | Promise<void>
+  afterClaim?: () => void | Promise<void>
+}
+
+export interface CreatedEmployeePackage extends EmployeePackageSummary {
+  recipe: EmployeeRecipeId
 }
 
 function fileErrorCode(error: unknown): string | undefined {
@@ -82,7 +124,7 @@ function requirePackageName(value: string): string {
 async function assertNewDirectoryTarget(directory: string): Promise<void> {
   try {
     await lstat(directory)
-    throw new TypeError(`init_target_already_exists:${directory}`)
+    throw new TypeError("init_target_already_exists")
   } catch (error) {
     if (fileErrorCode(error) !== "ENOENT") throw error
   }
@@ -92,124 +134,177 @@ async function assertNewDirectoryTarget(directory: string): Promise<void> {
   }
 }
 
-function employeeManifest(
-  name: string,
-  author: string,
-): EmployeePackageManifest {
-  return validateEmployeePackageManifest({
-    $schema:
-      "https://raw.githubusercontent.com/fullstack-ai-infra/digital-employee/main/configs/employee-package.schema.json",
-    schemaVersion: "employee-package.v1alpha1",
-    name,
-    version: "0.1.0",
-    description: "A portable digital employee built with Digital Employee.",
-    license: "Apache-2.0",
-    authors: [author],
-    host: {
-      protocol: "agent-host.v1",
-      requiredCapabilities: [],
-    },
-    entrypoints: {
-      skill: "./SKILL.md",
-      inputSchema: "./schemas/input.schema.json",
-      outputSchema: "./schemas/output.schema.json",
-    },
-    policy: {
-      mode: "read_only",
-      network: "deny",
-      filesystem: {
-        read: ["./knowledge/**"],
-        write: [],
-      },
-      mcpTools: [],
-    },
-    assets: ["./knowledge/README.md", "./evals/cases.json"],
-  })
+type EmployeePackageFile = readonly [portablePath: string, content: Uint8Array]
+
+interface OwnedPackagePath {
+  path: string
+  device: number
+  inode: number
+  directory: boolean
 }
 
-function skillTemplate(name: string): string {
-  return `---
-name: ${name}
-description: A read-only digital employee that answers from approved knowledge and escalates uncertainty.
----
-
-# ${name}
-
-## Role
-
-Answer the user's task using only approved knowledge and capabilities declared by this employee package.
-
-## Operating rules
-
-1. Read before answering and cite the approved source used.
-2. State uncertainty instead of inventing missing facts.
-3. Do not write files, execute business actions, or use undeclared tools.
-4. Escalate when evidence is insufficient or the request requires an action.
-
-## Knowledge
-
-Start with files under \`knowledge/\`. MCP capabilities may be added explicitly in \`employee.json\` later.
-`
+interface EmployeePackageTargetClaim {
+  directory: string
+  device: number
+  inode: number
+  markerPath: string
+  markerContent: string
+  owned: OwnedPackagePath[]
 }
 
-const INPUT_SCHEMA = {
-  $schema: "https://json-schema.org/draft/2020-12/schema",
-  type: "object",
-  additionalProperties: false,
-  required: ["message"],
-  properties: {
-    message: { type: "string", minLength: 1, maxLength: 20_000 },
-    context: { type: "object" },
-  },
+async function recordOwnedPackagePath(
+  filePath: string,
+  directory: boolean,
+): Promise<OwnedPackagePath> {
+  const stat = await lstat(filePath)
+  if (
+    stat.isSymbolicLink() ||
+    (directory ? !stat.isDirectory() : !stat.isFile())
+  ) {
+    throw new TypeError("init_publish_ownership_changed")
+  }
+  return {
+    path: filePath,
+    device: stat.dev,
+    inode: stat.ino,
+    directory,
+  }
 }
 
-const OUTPUT_SCHEMA = {
-  $schema: "https://json-schema.org/draft/2020-12/schema",
-  type: "object",
-  additionalProperties: false,
-  required: ["status", "answer", "citations"],
-  properties: {
-    status: { enum: ["answered", "escalated"] },
-    answer: { type: ["string", "null"] },
-    citations: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["label", "uri"],
-        properties: {
-          label: { type: "string" },
-          uri: { type: "string" },
-        },
-      },
-    },
-    escalation: {
-      type: ["object", "null"],
-      additionalProperties: false,
-      required: ["reason", "message"],
-      properties: {
-        reason: { type: "string" },
-        message: { type: "string" },
-        target: { type: "string" },
-      },
-    },
-  },
-  allOf: [
-    {
-      if: { properties: { status: { const: "escalated" } } },
-      then: {
-        required: ["escalation"],
-        properties: { escalation: { type: "object" } },
-      },
-    },
-  ],
+async function sameOwnedPackagePath(entry: OwnedPackagePath): Promise<boolean> {
+  try {
+    const stat = await lstat(entry.path)
+    return !stat.isSymbolicLink() &&
+      stat.dev === entry.device &&
+      stat.ino === entry.inode &&
+      (entry.directory ? stat.isDirectory() : stat.isFile())
+  } catch {
+    return false
+  }
+}
+
+async function cleanupOwnedPackageTarget(
+  claim: EmployeePackageTargetClaim,
+): Promise<void> {
+  let root
+  try {
+    root = await lstat(claim.directory)
+    if (
+      root.isSymbolicLink() ||
+      !root.isDirectory() ||
+      root.dev !== claim.device ||
+      root.ino !== claim.inode
+    ) {
+      return
+    }
+    const marker = claim.owned[0]
+    if (
+      !marker ||
+      marker.path !== claim.markerPath ||
+      !(await sameOwnedPackagePath(marker)) ||
+      (await readFile(claim.markerPath, "utf8")) !== claim.markerContent
+    ) {
+      return
+    }
+  } catch {
+    return
+  }
+
+  for (const entry of [...claim.owned].reverse()) {
+    if (!(await sameOwnedPackagePath(entry))) continue
+    try {
+      if (entry.directory) await rmdir(entry.path)
+      else await unlink(entry.path)
+    } catch {
+      // Unknown or concurrently changed content is never removed.
+    }
+  }
+  try {
+    root = await lstat(claim.directory)
+    if (
+      !root.isSymbolicLink() &&
+      root.isDirectory() &&
+      root.dev === claim.device &&
+      root.ino === claim.inode
+    ) {
+      await rmdir(claim.directory)
+    }
+  } catch {
+    // A non-empty or changed target belongs to the competing writer.
+  }
+}
+
+function packageDirectories(
+  directory: string,
+  files: readonly EmployeePackageFile[],
+): string[] {
+  const directories = new Set<string>()
+  for (const [portablePath] of files) {
+    const segments = portablePath.slice(2).split("/").slice(0, -1)
+    let current = directory
+    for (const segment of segments) {
+      current = path.join(current, segment)
+      directories.add(current)
+    }
+  }
+  return [...directories]
+}
+
+async function writeEmployeePackageFiles(
+  directory: string,
+  files: readonly EmployeePackageFile[],
+  owned?: OwnedPackagePath[],
+): Promise<void> {
+  for (const item of packageDirectories(directory, files)) {
+    await mkdir(item, { mode: 0o700 })
+    if (owned) owned.push(await recordOwnedPackagePath(item, true))
+  }
+  for (const [portablePath, content] of files) {
+    const filePath = path.join(directory, portablePath.slice(2))
+    await writeFile(filePath, content, {
+      flag: "wx",
+      mode: 0o600,
+    })
+    if (owned) owned.push(await recordOwnedPackagePath(filePath, false))
+  }
+}
+
+function resolveEmployeeRecipeId(value: string | undefined): EmployeeRecipeId {
+  const recipe = value ?? DEFAULT_EMPLOYEE_RECIPE
+  if (!(EMPLOYEE_RECIPE_IDS as readonly string[]).includes(recipe)) {
+    throw new TypeError(`unknown_employee_recipe:${recipe}`)
+  }
+  return recipe as EmployeeRecipeId
+}
+
+function renameRecipeSkill(
+  content: string,
+  sourceName: string,
+  targetName: string,
+): string {
+  if (sourceName === targetName) return content
+  const lines = content.split("\n")
+  const frontmatterEnd = lines.indexOf("---", 1)
+  const nameLines = lines
+    .slice(1, frontmatterEnd)
+    .map((line, index) => ({ line, index: index + 1 }))
+    .filter(({ line }) => line === `name: ${sourceName}`)
+  if (frontmatterEnd < 2 || nameLines.length !== 1) {
+    throw new TypeError("employee_recipe_skill_name_not_replaceable")
+  }
+  lines[nameLines[0]!.index] = `name: ${targetName}`
+  const heading = lines.indexOf(`# ${sourceName}`, frontmatterEnd + 1)
+  if (heading >= 0) lines[heading] = `# ${targetName}`
+  return lines.join("\n")
 }
 
 export async function createEmployeePackage(
   requestedDirectory: string,
   options: CreateEmployeePackageOptions = {},
-): Promise<EmployeePackageSummary> {
+  hooks: EmployeePackageCreationHooks = {},
+): Promise<CreatedEmployeePackage> {
   const directory = path.resolve(requestedDirectory)
+  const recipe = resolveEmployeeRecipeId(options.recipe)
   const name = requirePackageName(
     options.name?.trim() || packageNameFromDirectory(directory),
   )
@@ -222,46 +317,99 @@ export async function createEmployeePackage(
   }
 
   await assertNewDirectoryTarget(directory)
-  const manifest = employeeManifest(name, author)
-  const files: Array<[string, string]> = [
-    [EMPLOYEE_PACKAGE_MANIFEST_NAME, `${JSON.stringify(manifest, null, 2)}\n`],
-    ["SKILL.md", skillTemplate(name)],
-    ["schemas/input.schema.json", `${JSON.stringify(INPUT_SCHEMA, null, 2)}\n`],
-    ["schemas/output.schema.json", `${JSON.stringify(OUTPUT_SCHEMA, null, 2)}\n`],
-    [
-      "knowledge/README.md",
-      "# Approved knowledge\n\nReplace this file with reviewed, source-attributed knowledge for the employee.\n",
-    ],
-    [
-      "evals/cases.json",
-      `${JSON.stringify({ schemaVersion: "employee-evals.v1alpha1", cases: [] }, null, 2)}\n`,
-    ],
-  ]
-  const temporaryDirectory = await mkdtemp(
+  const recipeInspection = await inspectEmployeePackage(
+    EMPLOYEE_RECIPE_PACKAGES[recipe],
+  )
+  const recipeEntries = await readPackageDigestEntries(
+    recipeInspection.directory,
+    recipeInspection,
+  )
+  const manifest = validateEmployeePackageManifest({
+    ...recipeInspection.manifest,
+    name,
+    authors: [author],
+  })
+  const files = recipeEntries.map((entry) => {
+    if (entry.path === `./${EMPLOYEE_PACKAGE_MANIFEST_NAME}`) {
+      return [entry.path, Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`)] as const
+    }
+    if (entry.path === recipeInspection.manifest.entrypoints.skill) {
+      return [
+        entry.path,
+        Buffer.from(
+          renameRecipeSkill(
+            Buffer.from(entry.bytes).toString("utf8"),
+            recipeInspection.manifest.name,
+            name,
+          ),
+        ),
+      ] as const
+    }
+    return [entry.path, entry.bytes] as const
+  })
+  const temporaryRoot = await mkdtemp(
     path.join(path.dirname(directory), `.digital-employee-${name}-`),
   )
+  const temporaryDirectory = path.join(temporaryRoot, name)
   try {
-    await Promise.all([
-      mkdir(path.join(temporaryDirectory, "schemas")),
-      mkdir(path.join(temporaryDirectory, "knowledge")),
-      mkdir(path.join(temporaryDirectory, "evals")),
-    ])
-    await Promise.all(
-      files.map(([relativePath, content]) =>
-        writeFile(path.join(temporaryDirectory, relativePath), content, {
-          encoding: "utf8",
-          flag: "wx",
-          mode: 0o600,
-        }),
-      ),
-    )
-    await rename(temporaryDirectory, directory)
-  } catch (error) {
-    await rm(temporaryDirectory, { recursive: true, force: true })
-    throw error
+    await mkdir(temporaryDirectory, { mode: 0o700 })
+    await writeEmployeePackageFiles(temporaryDirectory, files)
+    await inspectEmployeePackage(temporaryDirectory)
+    await hooks.beforePublish?.()
+    try {
+      await mkdir(directory, { mode: 0o700 })
+    } catch (error) {
+      if (fileErrorCode(error) === "EEXIST") {
+        throw new TypeError("init_target_already_exists")
+      }
+      throw error
+    }
+    let claim: EmployeePackageTargetClaim | undefined
+    try {
+      const root = await lstat(directory)
+      const ownershipToken = randomBytes(16).toString("hex")
+      const markerPath = path.join(
+        directory,
+        `.digital-employee-init-claim-${ownershipToken}`,
+      )
+      const markerContent = `digital-employee-init-claim.v1\n${ownershipToken}\n`
+      await writeFile(markerPath, markerContent, {
+        flag: "wx",
+        mode: 0o600,
+      })
+      claim = {
+        directory,
+        device: root.dev,
+        inode: root.ino,
+        markerPath,
+        markerContent,
+        owned: [await recordOwnedPackagePath(markerPath, false)],
+      }
+      await hooks.afterClaim?.()
+      await writeEmployeePackageFiles(directory, files, claim.owned)
+      await inspectEmployeePackage(directory)
+      await unlink(markerPath)
+    } catch (error) {
+      if (claim) await cleanupOwnedPackageTarget(claim)
+      else {
+        try {
+          await rmdir(directory)
+        } catch {
+          // A non-empty claim is preserved because ownership was not proven.
+        }
+      }
+      throw new TypeError("init_publish_incomplete", { cause: error })
+    }
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true })
   }
 
-  return { directory, manifest, files: files.map(([file]) => `./${file}`) }
+  return {
+    directory,
+    manifest,
+    files: files.map(([portablePath]) => portablePath),
+    recipe,
+  }
 }
 
 async function readBoundedFile(
@@ -466,6 +614,22 @@ export async function inspectEmployeePackage(
       ...(mcpManifest ? { mcp: mcpManifest } : {}),
     },
   }
+}
+
+export async function readDeclaredEmployeePackageAsset(
+  inspection: EmployeePackageInspection,
+  portablePath: string,
+): Promise<string> {
+  if (!inspection.manifest.assets.includes(portablePath)) {
+    throw new TypeError(`employee_package_asset_not_declared:${portablePath}`)
+  }
+  const filePath = await resolvePackageFile(inspection.directory, portablePath)
+  const bytes = await readRegularFileNoFollow(
+    filePath,
+    MAX_ASSET_BYTES,
+    portablePath,
+  )
+  return bytes.toString("utf8")
 }
 
 async function readRegularFileNoFollow(

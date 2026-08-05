@@ -17,8 +17,10 @@ Digital Employee 不再实现另一套通用模型或工具循环。选定的 Ag
 本机创建、校验和运行路径不依赖 marketplace。
 
 `answer-agent` 是历史上的首个员工用例，不是产品定义。当前仓库中的实现属于
-`standalone-v1`；真正 Agent-native 的 recipe 尚未 shipped，交付首个 recipe 是 M0
-结果。`standalone-v1` 是兼容路径，不是新通用 Agent 能力的目标演进路径。
+`standalone-v1`。M0 现已交付 `minimal-answer.v1` 和 `structured-action.v1`，作为
+Agent-native 员工包 recipe，用于离线员工包/Schema fixture contract conformance
+起步；它们不构成对任何模型、Agent、Agent Host、MCP 集成、线上响应或响应质量的认证。
+`standalone-v1` 仍是兼容路径，不是新通用 Agent 能力的目标演进路径。
 
 ## 北极星指标：Verified Local Employee Run
 

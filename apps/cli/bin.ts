@@ -20,6 +20,7 @@ import {
   createEmployeePackage,
   inspectEmployeePackage,
 } from "./employee-package.js";
+import { evaluateEmployeePackage } from "./employee-eval.js";
 
 type EmployeeResult = Awaited<ReturnType<DigitalEmployee["answer"]>>;
 
@@ -35,6 +36,7 @@ interface CommandValues {
   deadline?: string;
   name?: string;
   author?: string;
+  recipe?: string;
   host: string;
   port: string;
   help: boolean;
@@ -48,8 +50,9 @@ function usage() {
 
 Agent-native usage:
   digital-employee doctor [--engine claude-code|qoder|codex|qwen-code|codebuddy] [--json]
-  digital-employee init <directory> [--name employee-name] [--author author]
+  digital-employee init <directory> [--recipe minimal-answer.v1|structured-action.v1] [--name employee-name] [--author author]
   digital-employee validate [directory] [--engine claude-code|qoder|codex|qwen-code|codebuddy] [--json]
+  digital-employee eval [directory] [--json]
   digital-employee run [directory] --engine claude-code|qoder|qwen-code|codebuddy (--stdin | --input-file path | --question "..." | --input '{"message":"..."}') [--json]
 
 Standalone-v1 compatibility:
@@ -58,6 +61,7 @@ Standalone-v1 compatibility:
 Agent host diagnosis may execute a bounded local '<host> --version' probe.
 It does not attempt authentication, invoke a model, execute tools, or start an Agent run.
 Codex is probe-only.
+Eval is offline fixture conformance; it never invokes a model, Agent Host, MCP, or online service.
 The compatibility namespace uses the frozen model/retriever loop, not an Agent host.
 `;
 }
@@ -81,6 +85,7 @@ function parseCommand(argv: string[]) {
       deadline: { type: "string" },
       name: { type: "string" },
       author: { type: "string" },
+      recipe: { type: "string" },
       host: { type: "string", default: "127.0.0.1" },
       port: { type: "string", default: "3000" },
       help: { type: "boolean", short: "h", default: false }
@@ -258,19 +263,66 @@ async function init(values: CommandValues, positionals: string[]) {
   const directory = positionals[0];
   if (!directory) throw new TypeError("init_requires_directory");
   if (positionals.length > 1) throw new TypeError("init_accepts_one_directory");
-  const created = await createEmployeePackage(directory, {
-    name: values.name,
-    author: values.author
-  });
+  let created;
+  try {
+    created = await createEmployeePackage(directory, {
+      name: values.name,
+      author: values.author,
+      recipe: values.recipe
+    });
+  } catch (error) {
+    if (
+      error instanceof TypeError &&
+      error.message === "init_target_already_exists"
+    ) {
+      const result = {
+        status: "failed",
+        code: "INIT_TARGET_ALREADY_EXISTS"
+      };
+      if (values.json) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      } else {
+        process.stderr.write(`digital-employee: ${result.code}\n`);
+      }
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
+  }
   if (values.json) {
     process.stdout.write(`${JSON.stringify(created, null, 2)}\n`);
     return;
   }
-  process.stdout.write(`Created ${created.manifest.name} in ${created.directory}\n`);
+  process.stdout.write(
+    `Created ${created.manifest.name} from ${created.recipe} in ${created.directory}\n`,
+  );
   for (const file of created.files) process.stdout.write(`- ${file}\n`);
   process.stdout.write(
-    `\nNext: edit SKILL.md, add approved knowledge, then run validate ${created.directory}\n`
+    `\nNext: edit SKILL.md, add approved knowledge, then run validate and eval.\n`
   );
+}
+
+async function evalFixtures(values: CommandValues, positionals: string[]) {
+  if (positionals.length > 1) throw new TypeError("eval_accepts_one_directory");
+  if (values.engine) throw new TypeError("eval_does_not_accept_engine");
+  const result = await evaluateEmployeePackage(positionals[0] || process.cwd());
+  if (values.json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  } else {
+    process.stdout.write(
+      `Contract eval (offline fixture conformance): ${result.status}. ` +
+        `${result.summary.passed}/${result.summary.total} case(s) passed.\n`,
+    );
+    for (const evalCase of result.cases) {
+      process.stdout.write(
+        `- ${evalCase.id}: ${evalCase.status} (${evalCase.code})\n`,
+      );
+    }
+    if (result.status === "failed" && result.cases.length === 0) {
+      process.stdout.write(`- ${result.code}\n`);
+    }
+  }
+  if (result.status === "failed") process.exitCode = 1;
 }
 
 async function validate(values: CommandValues, positionals: string[]) {
@@ -472,6 +524,7 @@ async function main() {
   if (command === "doctor") return doctor(values);
   if (command === "init") return init(values, positionals);
   if (command === "validate") return validate(values, positionals);
+  if (command === "eval") return evalFixtures(values, positionals);
   if (command === "run") return run(values, positionals);
   throw new TypeError(`unknown_command:${command}`);
 }

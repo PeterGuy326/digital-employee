@@ -15,9 +15,11 @@ From a source checkout:
 ```bash
 npm run build
 node ./dist/apps/cli/bin.js init ../team-answer \
+  --recipe minimal-answer.v1 \
   --name team-answer \
   --author your-team
 node ./dist/apps/cli/bin.js validate ../team-answer
+node ./dist/apps/cli/bin.js eval ../team-answer
 node ./dist/apps/cli/bin.js doctor
 ```
 
@@ -25,15 +27,26 @@ After an Agent-native `0.2.0` or later release is actually published, the
 equivalent global commands will be:
 
 ```bash
-digital-employee init ./team-answer --author your-team
+digital-employee init ./team-answer --recipe minimal-answer.v1 --author your-team
 digital-employee validate ./team-answer
+digital-employee eval ./team-answer
 digital-employee doctor
 ```
 
 `init` requires a new, Agent-Skill-compatible target directory and never
 merges into or overwrites an existing directory. It builds in a sibling
-temporary directory and renames only after every file is complete. `validate`
-is static: it does not import employee code,
+temporary directory, statically validates the generated package, atomically
+claims the absent target directory, and publishes every file with exclusive
+creation. A concurrent or pre-existing target returns
+`INIT_TARGET_ALREADY_EXISTS` with exit code 1 and is left untouched. The exact
+built-in recipe identifiers are
+`minimal-answer.v1` and `structured-action.v1`; an omitted `--recipe` defaults
+to `minimal-answer.v1` for compatibility. Aliases, version ranges, `latest`,
+unknown versions and path-like selectors fail closed. The recipe suffix is the
+scaffold version, independent of the generated package's `employee.json`
+version.
+
+`validate` is static: it does not import employee code,
 load knowledge into a model, connect to MCP, read credentials or make a paid
 request. With `--engine`, it adds a bounded executable/version probe, the same
 package/policy preflight used by `run`, and fail-closed capability comparison.
@@ -44,6 +57,13 @@ or `CODEBUDDY_API_KEY` plus `CODEBUDDY_MODEL` for CodeBuddy. Optional Qwen and
 CodeBuddy Base URL settings are deployment configuration. Preflight does not
 spend credits or verify model entitlement; that remains untested until a real
 `run`. Codex remains probe-only.
+
+`eval` is a credential-free contract eval. It first performs the same static
+package validation, then checks declared input and expected-output fixtures
+against the package's JSON Schemas. This is offline fixture conformance only:
+it does not invoke a model, Agent Host, MCP, plugin, provider or online service,
+and `eval --engine` is rejected. It does not score live responses, prompt
+quality, model correctness or provider compatibility.
 
 One real run path is:
 
@@ -96,6 +116,62 @@ optional approved local material; large or private knowledge should stay in an
 authorized external system rather than be published in the package. Every
 local file made available to a run must also be listed explicitly in `assets`;
 policy globs grant a maximum scope but never discover package files.
+
+## Built-in recipes
+
+The checked-in recipe packages live under `examples/recipes/` and are copied
+to `dist/examples/recipes/` during a build.
+
+| Recipe | Declared capability | Policy | Purpose |
+| --- | --- | --- | --- |
+| `minimal-answer.v1` | none | read-only, network denied, no write paths or MCP tools | Answer from an approved sample asset and cite it |
+| `structured-action.v1` | `structured_output` only | read-only, network denied, no write paths or MCP tools | Produce proposal/intent data for review |
+
+`structured-action.v1` has no action executor. Its Skill, Schema, approved
+sample and fixture describe a proposal only; it never performs the proposed
+action or claims that an action completed. A separate authorized system would
+need to review and execute any proposal.
+
+## Offline contract eval
+
+The fixed eval asset is `./evals/cases.json`, and it must be explicitly listed
+in `employee.json.assets`. The top-level JSON object has exactly these fields:
+
+```json
+{
+  "schemaVersion": "employee-evals.v1alpha1",
+  "cases": [
+    {
+      "id": "stable-case-id",
+      "input": {},
+      "expectedOutput": {}
+    }
+  ]
+}
+```
+
+The `cases` array is nonempty and limited to 512 entries. Every case has
+exactly `id`, `input` and `expectedOutput`; IDs are unique portable identifiers
+and file order is preserved in the result. Unknown, missing or duplicate JSON
+keys and IDs fail closed. The existing package limits also apply, including the
+5 MiB per-asset and 20 MiB declared-package limits. Both fixtures are data:
+`input` is checked against the input Schema and `expectedOutput` against the
+output Schema. The `eval` command sends no fixture to a model.
+
+Machine output uses `employee-eval-result.v1alpha1`, includes package identity
+when static inspection made it available, and never includes the full package
+directory or dependency error text. A passing result exits zero. A failing
+result exits one and uses one of these stable codes:
+
+- `EVAL_PACKAGE_INVALID`
+- `EVAL_CONTRACT_INVALID`
+- `EVAL_CASE_INPUT_SCHEMA_INVALID`
+- `EVAL_CASE_EXPECTED_OUTPUT_SCHEMA_INVALID`
+
+Per-case results remain in file order and contain only the case ID, status and
+machine code. Because the cases file is declared package content rather than a
+hidden test set, it must contain no secrets, private data or held-out
+live-response benchmarks.
 
 ## Manifest fields
 
@@ -192,6 +268,7 @@ belongs to the separate platform/pricing phase.
 | --- | --- |
 | `init` | Implemented |
 | `validate` | Implemented; static plus optional host compatibility |
+| `eval` | Implemented; offline fixture conformance only, no Host/provider run |
 | `doctor` | Implemented; local readiness only, never starts a model run |
 | `run --engine qoder` | Implemented for Qoder CLI 1.1.x; stateless, read-only, no MCP/attachments |
 | `run --engine claude-code|qwen-code|codebuddy` | Implemented for the exact version gates above; stateless, context-only, no MCP/attachments |
