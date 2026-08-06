@@ -75,6 +75,22 @@ export type {
   AgentHostVectorResult,
 } from "./src/agent-host-vectors.js"
 export {
+  ADAPTER_QUALIFICATION_KIT_VERSION,
+  ADAPTER_QUALIFICATION_SCHEMA_ID,
+  QUALIFICATION_DOMAINS,
+  canonicalPolicyDigest,
+  runQualificationSuite,
+  validateAdapterQualificationRecord,
+} from "./src/adapter-qualification.js"
+export type {
+  AdapterQualificationRecord,
+  QualificationAxes,
+  QualificationCaseResult,
+  QualificationDomain,
+  QualificationLiveEvidence,
+  QualificationOptions,
+} from "./src/adapter-qualification.js"
+export {
   EMPLOYEE_PACKAGE_MANIFEST_NAME,
   EMPLOYEE_PACKAGE_SCHEMA_VERSION,
   deriveEffectiveAgentHostPolicy,
