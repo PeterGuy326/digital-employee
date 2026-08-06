@@ -141,6 +141,20 @@ const CAPABILITY_SUPPORT = new Set([
   "unknown",
 ])
 
+const PROBE_RESULT_KEYS = [
+  "protocolVersion",
+  "hostId",
+  "displayName",
+  "status",
+  "available",
+  "adapterStatus",
+  "version",
+  "capabilities",
+  "capabilitySource",
+  "issues",
+]
+const PROBE_ISSUE_KEYS = ["code", "message", "blocking"]
+
 function plainRecord(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false
   try {
@@ -175,6 +189,7 @@ export function validateAgentHostProbeResult(
       const capabilities = value.capabilities
       const issues = value.issues
       valid =
+        Object.keys(value).every((key) => PROBE_RESULT_KEYS.includes(key)) &&
         boundedString(value.protocolVersion, 64) &&
         value.hostId === expectedHostId &&
         boundedString(value.displayName, 256) &&
@@ -192,6 +207,7 @@ export function validateAgentHostProbeResult(
         issues.every(
           (entry) =>
             plainRecord(entry) &&
+            Object.keys(entry).every((key) => PROBE_ISSUE_KEYS.includes(key)) &&
             boundedString(entry.code, 128) &&
             boundedString(entry.message, 2_000, true) &&
             typeof entry.blocking === "boolean",
