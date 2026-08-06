@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "employee-mcp.v1alpha1",
+  "servers": [
+    {
+      "name": "synthetic-mem",
+      "transport": {
+        "type": "stdio",
+        "command": "synthetic-mem-server",
+        "args": [],
+        "environment": []
+      }
+    },
+    {
+      "name": "synthetic-doc",
+      "transport": {
+        "type": "stdio",
+        "command": "synthetic-doc-server",
+        "args": [],
+        "environment": []
+      }
+    }
+  ]
+}

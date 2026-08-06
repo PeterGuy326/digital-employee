@@ -118,6 +118,25 @@ async function cancelAdapterSafely(
   }
 }
 
+async function disposeAdapterSafely(adapter: unknown): Promise<void> {
+  const disposable = adapter as { dispose?: () => Promise<void> } | undefined
+  if (!disposable || typeof disposable.dispose !== "function") return
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      disposable.dispose(),
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, 1_000)
+        timeout.unref()
+      }),
+    ])
+  } catch {
+    // The run result is already settled; cleanup must not replace it.
+  } finally {
+    if (timeout) clearTimeout(timeout)
+  }
+}
+
 type AbortableResult<T> =
   | { status: "resolved"; value: T }
   | { status: "rejected" }
@@ -298,6 +317,8 @@ export async function inspectEmployeeHostCompatibility(
       )
     } catch {
       throw hostInspectionFailure("AGENT_HOST_PREFLIGHT_FAILED", engine)
+    } finally {
+      await disposeAdapterSafely(adapter)
     }
   } else {
     try {
@@ -384,7 +405,7 @@ export async function runEmployeePackage(
   } catch {
     return failed(identity, "agent_host_adapter_resolution_failed")
   }
-
+  try {
   let input: SafeValue
   try {
     input = asSafeValue(options.input)
@@ -584,5 +605,8 @@ export async function runEmployeePackage(
     status: "completed",
     ...identity,
     output: terminal.output,
+  }
+  } finally {
+    await disposeAdapterSafely(adapter)
   }
 }
