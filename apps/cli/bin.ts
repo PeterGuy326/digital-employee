@@ -2,9 +2,13 @@
 
 import { parseArgs } from "node:util";
 import { createReadStream } from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DigitalEmployee } from "../../packages/core/src/digital-employee.js";
+import { validateStdioAdapterConfig } from "../../packages/core/src/agent-host-stdio-config.js";
+import type { AgentHostPolicy } from "../../packages/core/src/agent-host.js";
+import { ExternalStdioAgentHostAdapter } from "./stdio-agent-host.js";
 import {
   BUILT_IN_AGENT_HOST_IDS,
 } from "./agent-hosts.js";
@@ -54,6 +58,7 @@ Agent-native usage:
   digital-employee validate [directory] [--engine claude-code|qoder|codex|qwen-code|codebuddy] [--json]
   digital-employee eval [directory] [--json]
   digital-employee run [directory] --engine claude-code|qoder|qwen-code|codebuddy (--stdin | --input-file path | --question "..." | --input '{"message":"..."}') [--json]
+  digital-employee stdio-host <config.json> [--question "..."] [--json]
 
 Standalone-v1 compatibility:
   digital-employee legacy <ask|sync|start|serve> [options]
@@ -526,7 +531,63 @@ async function main() {
   if (command === "validate") return validate(values, positionals);
   if (command === "eval") return evalFixtures(values, positionals);
   if (command === "run") return run(values, positionals);
+  if (command === "stdio-host") return stdioHost(values, positionals);
   throw new TypeError(`unknown_command:${command}`);
+}
+
+function stdioHostPolicy(): AgentHostPolicy {
+  return {
+    tools: { default: "deny", allow: [] },
+    filesystem: { read: ["."], write: [] },
+    network: { mode: "deny" },
+    approval: { mode: "never" },
+    maxTurns: 4,
+  };
+}
+
+async function stdioHost(values: CommandValues, positionals: string[]) {
+  const configPath = positionals[0];
+  if (!configPath) {
+    throw new TypeError("stdio_host_config_required");
+  }
+  const config = validateStdioAdapterConfig(
+    JSON.parse(await readFile(configPath, "utf8")),
+  );
+  const adapter = new ExternalStdioAgentHostAdapter(config);
+  try {
+    const probe = await adapter.probe();
+    if (!values.question) {
+      process.stdout.write(`${JSON.stringify(probe, null, 2)}\n`);
+      return;
+    }
+    await adapter.preflight({
+      runId: "cli-stdio-preflight",
+      employeeId: "cli",
+      workingDirectory: process.cwd(),
+      prompt: values.question,
+      policy: stdioHostPolicy(),
+    });
+    const events = [];
+    for await (const event of adapter.run({
+      runId: "cli-stdio-run",
+      employeeId: "cli",
+      workingDirectory: process.cwd(),
+      prompt: values.question,
+      policy: stdioHostPolicy(),
+    })) {
+      events.push(event);
+    }
+    if (values.json) {
+      process.stdout.write(`${JSON.stringify(events, null, 2)}\n`);
+      return;
+    }
+    const terminal = events[events.length - 1];
+    process.stdout.write(
+      `${terminal && terminal.type === "run.completed" ? JSON.stringify(terminal.output) : "run_failed"}\n`,
+    );
+  } finally {
+    await adapter.dispose();
+  }
 }
 
 main().catch((error: unknown) => {
