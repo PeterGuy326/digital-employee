@@ -12,6 +12,18 @@ import {
   parseAgentHostStdioRequest,
 } from "../../packages/core/src/agent-host-stdio.js"
 import type { AgentHostStdioRequest } from "../../packages/core/src/agent-host-stdio.js"
+import { CoreError } from "../../packages/core/src/contracts.js"
+import {
+  MCP_CONFORMANCE_CODES,
+  SYNTHETIC_DOC_SERVER,
+  SYNTHETIC_MEM_SERVER,
+  loadCapabilityGrants,
+  readSyntheticDocument,
+  recallSyntheticMemory,
+  validateSyntheticDocumentFixture,
+  validateSyntheticMemoryFixture,
+} from "../../packages/core/src/mcp-conformance.js"
+import { readFileSync } from "node:fs"
 
 export const REFERENCE_STDIO_HOST_ID = "reference-stdio-host"
 
@@ -34,6 +46,11 @@ export function referenceStdioProbe(
   capabilities.tool_allowlist = "supported"
   capabilities.filesystem_scope = "supported"
   capabilities.network_policy = "supported"
+  // The MCP capability is only declared when the synthetic grant boundary is
+  // wired into this host; without it the host stays MCP-unknown, fail-closed.
+  if (process.env.SYNTHETIC_MCP_GRANT !== undefined) {
+    capabilities.mcp = "supported"
+  }
   if (overrides.missingCapability) {
     delete (capabilities as Record<string, unknown>)[overrides.missingCapability]
   }
@@ -91,6 +108,114 @@ function event(id: string, runId: string, body: Record<string, unknown>): void {
     kind: "event",
     event: { runId, timestamp: new Date().toISOString(), ...body },
   })
+}
+
+const RUN_ERROR_CODE_PATTERN = /^[a-z0-9][a-z0-9._-]{0,127}$/
+
+interface SyntheticRunPayload {
+  mcpServers?: Array<{ name: string }>
+  metadata?: Record<string, unknown>
+  policy?: { tools?: { allow?: Array<{ name: string; mode: string }> } }
+  workingDirectory?: string
+}
+
+function loadJsonFile(path: string | undefined): unknown {
+  if (!path) {
+    throw new CoreError(
+      MCP_CONFORMANCE_CODES.serviceUnavailable,
+      "synthetic fixture is not configured",
+      { status: 400, retryable: false },
+    )
+  }
+  return JSON.parse(readFileSync(path, "utf8"))
+}
+
+/**
+ * Binds declared synthetic-mem/synthetic-doc MCP servers to their public
+ * fixtures through the operator grant. Returns a terminal output on granted
+ * runs, a frozen failure code otherwise, or null when the run declares no
+ * synthetic MCP server.
+ */
+function syntheticMcpOutcome(
+  payload: SyntheticRunPayload,
+): { output: Record<string, unknown> } | { failed: string } | null {
+  const servers = payload.mcpServers ?? []
+  const wantsMem = servers.some((server) => server.name === SYNTHETIC_MEM_SERVER)
+  const wantsDoc = servers.some((server) => server.name === SYNTHETIC_DOC_SERVER)
+  if (!wantsMem && !wantsDoc) return null
+  try {
+    const grants = loadCapabilityGrants(
+      process.env.SYNTHETIC_MCP_GRANT ?? "",
+      payload.workingDirectory,
+    )
+    const metadata = payload.metadata ?? {}
+    // Embedders pass identity through run metadata; operator-driven runs pin
+    // it through the host environment instead. Either way it is explicit.
+    const principal =
+      typeof metadata.principal === "string"
+        ? metadata.principal
+        : process.env.SYNTHETIC_MCP_PRINCIPAL
+    const workspace =
+      typeof metadata.workspace === "string"
+        ? metadata.workspace
+        : process.env.SYNTHETIC_MCP_WORKSPACE
+    if (typeof principal !== "string" || typeof workspace !== "string") {
+      return { failed: MCP_CONFORMANCE_CODES.scopeDenied }
+    }
+    const requestedMode = (payload.policy?.tools?.allow ?? []).some(
+      (tool) =>
+        tool.mode === "write" &&
+        (tool.name.startsWith("mem.") || tool.name.startsWith("doc.")),
+    )
+      ? "write"
+      : "read"
+    const citations: Array<{ label: string; uri: string }> = []
+    if (wantsMem) {
+      const fixture = validateSyntheticMemoryFixture(
+        loadJsonFile(process.env.SYNTHETIC_MCP_MEM_FIXTURE),
+      )
+      for (const item of recallSyntheticMemory({
+        fixture,
+        grants,
+        principal,
+        workspace,
+        requestedMode,
+      })) {
+        citations.push({ label: item.locator, uri: item.locator })
+      }
+    }
+    if (wantsDoc) {
+      const fixture = validateSyntheticDocumentFixture(
+        loadJsonFile(process.env.SYNTHETIC_MCP_DOC_FIXTURE),
+      )
+      const documentId = metadata.documentId
+      const revision = metadata.revision
+      if (typeof documentId === "string" && typeof revision === "number") {
+        const document = readSyntheticDocument({
+          fixture,
+          grants,
+          principal,
+          workspace,
+          documentId,
+          revision,
+          requestedMode,
+        })
+        citations.push({ label: document.title, uri: document.locator })
+      }
+    }
+    return {
+      output: {
+        status: "answered",
+        answer: "synthetic mcp context",
+        citations,
+      },
+    }
+  } catch (error) {
+    if (error instanceof CoreError && RUN_ERROR_CODE_PATTERN.test(error.code)) {
+      return { failed: error.code }
+    }
+    return { failed: MCP_CONFORMANCE_CODES.serviceUnavailable }
+  }
 }
 
 /**
@@ -212,10 +337,26 @@ export function serveReferenceStdioHost(): void {
           activeRun = null
           return
         }
+        const synthetic = syntheticMcpOutcome(payload as SyntheticRunPayload)
+        if (synthetic && "failed" in synthetic) {
+          event(request.id, payload.runId, {
+            type: "run.failed",
+            error: {
+              code: synthetic.failed,
+              message: "synthetic mcp conformance decision",
+              retryable: false,
+            },
+          })
+          successResponse(request.id)
+          activeRun = null
+          return
+        }
         const output =
-          payload.outputSchema !== undefined
-            ? { answer: "reference" }
-            : { status: "answered", answer: "reference host", citations: [] }
+          synthetic && "output" in synthetic
+            ? synthetic.output
+            : payload.outputSchema !== undefined
+              ? { answer: "reference" }
+              : { status: "answered", answer: "reference host", citations: [] }
         event(request.id, payload.runId, {
           type: "run.completed",
           output,

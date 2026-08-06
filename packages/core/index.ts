@@ -97,6 +97,30 @@ export {
 } from "./src/agent-host-stdio-config.js"
 export type { StdioAdapterConfig } from "./src/agent-host-stdio-config.js"
 export {
+  CAPABILITY_GRANT_SCHEMA_VERSION,
+  MCP_CONFORMANCE_CODES,
+  SYNTHETIC_DOC_SERVER,
+  SYNTHETIC_MEM_SERVER,
+  checkCapabilityGrant,
+  loadCapabilityGrants,
+  readSyntheticDocument,
+  recallSyntheticMemory,
+  validateCapabilityGrants,
+  validateSyntheticDocumentFixture,
+  validateSyntheticMemoryFixture,
+} from "./src/mcp-conformance.js"
+export type {
+  CapabilityGrantEntry,
+  CapabilityGrantSet,
+  CapabilityScope,
+  DocumentReadItem,
+  MemoryRecallItem,
+  SyntheticDocument,
+  SyntheticDocumentFixture,
+  SyntheticMemory,
+  SyntheticMemoryFixture,
+} from "./src/mcp-conformance.js"
+export {
   AGENT_HOST_STDIO_ERROR_CODES,
   AGENT_HOST_STDIO_MAX_LINE_BYTES,
   AGENT_HOST_STDIO_PROTOCOL_VERSION,
