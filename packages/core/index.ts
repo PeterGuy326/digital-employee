@@ -91,6 +91,26 @@ export type {
   QualificationOptions,
 } from "./src/adapter-qualification.js"
 export {
+  AGENT_HOST_STDIO_CONFIG_SCHEMA_VERSION,
+  stdioAdapterEnvironment,
+  validateStdioAdapterConfig,
+} from "./src/agent-host-stdio-config.js"
+export type { StdioAdapterConfig } from "./src/agent-host-stdio-config.js"
+export {
+  AGENT_HOST_STDIO_ERROR_CODES,
+  AGENT_HOST_STDIO_MAX_LINE_BYTES,
+  AGENT_HOST_STDIO_PROTOCOL_VERSION,
+  encodeAgentHostStdioLine,
+  parseAgentHostStdioHostLine,
+  parseAgentHostStdioRequest,
+  probeResultFromStdioResponse,
+} from "./src/agent-host-stdio.js"
+export type {
+  AgentHostStdioMessage,
+  AgentHostStdioRequest,
+  AgentHostStdioRequestKind,
+} from "./src/agent-host-stdio.js"
+export {
   EMPLOYEE_PACKAGE_MANIFEST_NAME,
   EMPLOYEE_PACKAGE_SCHEMA_VERSION,
   deriveEffectiveAgentHostPolicy,
