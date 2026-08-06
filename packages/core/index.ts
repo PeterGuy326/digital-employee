@@ -46,6 +46,35 @@ export type {
   AgentHostRegistryPort,
 } from "./src/agent-host-registry.js"
 export {
+  AGENT_HOST_PROBE_WIRE_KEYS,
+  AGENT_HOST_VECTOR_CODES,
+  classifyAgentHostCompatibility,
+  classifyAgentHostEventStream,
+  validateAgentHostEventWire,
+  validateAgentHostProbeWire,
+  validateAgentHostRunRequestWire,
+} from "./src/agent-host-wire.js"
+export type { AgentHostVectorClassification } from "./src/agent-host-wire.js"
+export {
+  AGENT_HOST_VECTOR_FAMILIES,
+  AGENT_HOST_VECTOR_RESULT_SCHEMA_VERSION,
+  AGENT_HOST_VECTOR_SCHEMA_VERSION,
+  classifyAgentHostVector,
+  parseAgentHostVectorFile,
+  parseAgentHostVectorManifest,
+  runAgentHostVectorCorpus,
+} from "./src/agent-host-vectors.js"
+export type {
+  AgentHostVector,
+  AgentHostVectorExpectation,
+  AgentHostVectorFailure,
+  AgentHostVectorFamily,
+  AgentHostVectorFile,
+  AgentHostVectorManifest,
+  AgentHostVectorManifestEntry,
+  AgentHostVectorResult,
+} from "./src/agent-host-vectors.js"
+export {
   EMPLOYEE_PACKAGE_MANIFEST_NAME,
   EMPLOYEE_PACKAGE_SCHEMA_VERSION,
   deriveEffectiveAgentHostPolicy,
