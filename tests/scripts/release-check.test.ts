@@ -13,6 +13,7 @@ import {
   validateCandidateFileSet
 } from "../../scripts/distribution-policy.js";
 import {
+  PACKAGE_SPECS,
   validateDistributionManifest,
   validateArchiveIntegrity,
   validatePackOutput
@@ -566,4 +567,55 @@ test("release workflow has independently scoped jobs for all channels", async ()
   assert.ok(workflow.jobs.ghcr);
   assert.match(workflowText, /gh release (?:create|upload)/);
   assert.match(workflowText, /docker push/);
+});
+
+test("pull request CI rejects internal commit email metadata", async () => {
+  const workflowText = await readFile(
+    path.join(repositoryRoot, ".github/workflows/ci.yml"),
+    "utf8"
+  );
+  const workflow = YAML.parse(workflowText);
+  const commitMetadata = workflow.jobs["commit-metadata"];
+  assert.equal(
+    commitMetadata.if,
+    "${{ github.event_name == 'pull_request' }}"
+  );
+  assert.equal(commitMetadata["timeout-minutes"], 5);
+  assert.equal(commitMetadata.steps[0].with["fetch-depth"], 0);
+  const metadataRun = commitMetadata.steps.at(-1).run;
+  assert.match(metadataRun, /git log --format='%ae%n%ce'/);
+  assert.match(metadataRun, /grep --extended-regexp --ignore-case --quiet/);
+  assert.match(metadataRun, /alibaba-inc\\\.com\|alibaba\\\.com/);
+  assert.match(metadataRun, /disallowed internal email domain/);
+  assert.doesNotMatch(metadataRun, /grep[^\n]*(?:--line-number|-n\b)/);
+});
+
+test("root pack spec requires every deploy runtime artifact", () => {
+  const [rootSpec] = PACKAGE_SPECS;
+  for (const required of [
+    "dist/apps/cli/deploy/channels.js",
+    "dist/apps/cli/deploy/config.js",
+    "dist/apps/cli/deploy/dingtalk-provider.js",
+    "dist/apps/cli/deploy/dws-supervisor.js",
+    "dist/apps/cli/deploy/engines.js",
+    "dist/apps/cli/deploy/http-runtime.js",
+    "dist/apps/cli/deploy/i18n.js",
+    "dist/apps/cli/deploy/index.js",
+    "dist/apps/cli/deploy/prompts.js"
+  ]) {
+    assert.ok(rootSpec.requiredFiles.includes(required), `missing required ${required}`);
+  }
+  assert.equal(
+    new Set(rootSpec.requiredFiles).size,
+    rootSpec.requiredFiles.length,
+    "required files must not contain duplicates"
+  );
+});
+
+test("core pack spec admits the bundled documentation files", () => {
+  const [, coreSpec] = PACKAGE_SPECS;
+  for (const bundled of ["README.md", "LICENSE", "NOTICE"]) {
+    assert.ok(coreSpec.requiredFiles.includes(bundled), `missing required ${bundled}`);
+    assert.ok(coreSpec.allowedFiles.includes(bundled), `not allowed ${bundled}`);
+  }
 });

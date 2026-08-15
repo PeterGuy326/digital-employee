@@ -27,6 +27,21 @@ All notable changes to this project will be documented in this file.
   not-ready/non-conformance/probe-only/unavailable migration rejection,
   completed-plus-failed terminal ambiguity, and exact probe result/issue keys
   in one integrated Issue #46 ledger.
+- Added package-bound `deploy [package-path]` with exact identity/version/digest
+  binding, explicit runtime semantics, localized deterministic automation,
+  truthful `ready|pending_external_action|unsupported|failed` outcomes, a
+  verified loopback HTTP runtime, Console pending guidance, and a fail-closed
+  DingTalk reconciliation path. Current DWS JSON list output omits the required
+  pagination metadata, so real DingTalk integration remains on external HOLD.
+- Hardened deploy so DingTalk resources cannot be orphaned by implicit
+  rebinding, provider create errors retain their durable reconciliation fence,
+  provider identities and fences are tenant/auth-scope bound without persisting
+  raw identity or credential data,
+  HTTP runtimes receive only the selected engine credentials, and requests run
+  from a private digest-bound package snapshot.
+- Added bounded interactive input and clean installed-tarball deploy gates,
+  including recipe assets, setup version identity, health/ask readback, and
+  runtime PID cleanup.
 - Real-local Phase A path (#42): a `component-matrix.v1` contract that pins
   the exact `mem` and `doc` service commits as the sole version authority, a
   deterministic `real-local-stdio-host` Agent Host fixture that resumes
@@ -63,6 +78,12 @@ All notable changes to this project will be documented in this file.
   version probe; invalid, oversized, or asynchronous Schemas therefore cannot
   reach a paid model invocation. Invalid, oversized, or asynchronous Schema and
   unsafe terminal output produce typed failures.
+- Deployment state now uses a strict secret-free schema, owner-only atomic
+  persistence, generation checks, and a retained local `lockf`/`flock`
+  descriptor. HTTP activation is parent-coupled through an exact fd4 lease and
+  publishes Ready only after fresh state/package/endpoint readback; unsafe PIDs
+  are preserved without blind signals. DingTalk writes persist an operation
+  fence before create and every uncertain retry is reconcile-only.
 - Qoder assistant text is now buffered until successful process and cleanup
   completion, then scrubbed as one value with the exact service credential.
   This prevents secrets split across native stream chunks from escaping in
@@ -73,8 +94,9 @@ All notable changes to this project will be documented in this file.
 
 ## [0.3.0] - 2026-08-04
 
-This source candidate adds the publisher-owned Runner execution boundary. It
-has not been published to npm, GHCR or GitHub Releases.
+This public release added the publisher-owned Runner execution boundary and is
+available through the root and core npm packages, GHCR, and GitHub Releases.
+It predates the package-bound `deploy` work in `[Unreleased]`.
 
 ### Added
 

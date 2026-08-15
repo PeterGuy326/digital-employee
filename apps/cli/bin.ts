@@ -25,7 +25,7 @@ import {
   inspectEmployeePackage,
 } from "./employee-package.js";
 import { evaluateEmployeePackage } from "./employee-eval.js";
-import { deploy } from "./deploy/index.js";
+import { deploy, renderDeployParseFailure } from "./deploy/index.js";
 import { setup } from "./setup.js";
 
 type EmployeeResult = Awaited<ReturnType<DigitalEmployee["answer"]>>;
@@ -46,6 +46,8 @@ interface CommandValues {
   host: string;
   port: string;
   locale?: string;
+  runtime?: string;
+  package?: string;
   yes: boolean;
   help: boolean;
 }
@@ -58,7 +60,7 @@ function usage() {
 
 Agent-native usage:
   digital-employee setup [directory] [--name employee-name] [--recipe minimal-answer.v1|structured-action.v1] [--json]
-  digital-employee deploy
+  digital-employee deploy [package-path] [--package path] --channel <id> --engine <id> --runtime agent-native|standalone-v1 [options]
   digital-employee doctor [--engine claude-code|qoder|codex|qwen-code|codebuddy] [--json]
   digital-employee init <directory> [--recipe minimal-answer.v1|structured-action.v1] [--name employee-name] [--author author]
   digital-employee validate [directory] [--engine claude-code|qoder|codex|qwen-code|codebuddy] [--json]
@@ -84,6 +86,7 @@ function parseCommand(argv: string[]) {
     args: rest,
     allowPositionals: true,
     strict: true,
+    tokens: true,
     options: {
       config: { type: "string", short: "c", default: defaultConfig },
       question: { type: "string", short: "q" },
@@ -100,6 +103,8 @@ function parseCommand(argv: string[]) {
       host: { type: "string", default: "127.0.0.1" },
       port: { type: "string", default: "3000" },
       locale: { type: "string" },
+      runtime: { type: "string" },
+      package: { type: "string" },
       yes: { type: "boolean", short: "y", default: false },
       help: { type: "boolean", short: "h", default: false }
     }
@@ -112,6 +117,11 @@ function parseCommand(argv: string[]) {
       inputFile: values["input-file"],
     } as CommandValues,
     positionals: parsed.positionals,
+    providedOptions: new Set(
+      parsed.tokens
+        .filter((token) => token.kind === "option")
+        .map((token) => token.name),
+    ),
   };
 }
 
@@ -522,7 +532,18 @@ async function runLegacyCommand(
 }
 
 async function main() {
-  const { command, values, positionals } = parseCommand(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  let parsed: ReturnType<typeof parseCommand>;
+  try {
+    parsed = parseCommand(argv);
+  } catch (error) {
+    if (argv[0] === "deploy") {
+      renderDeployParseFailure(argv.slice(1), error);
+      return;
+    }
+    throw error;
+  }
+  const { command, values, positionals, providedOptions } = parsed;
   if (command === "help" || (values.help && command !== "deploy")) {
     process.stdout.write(usage());
     return;
@@ -541,12 +562,20 @@ async function main() {
     recipe: values.recipe,
   });
   if (command === "deploy") return deploy({
+    packagePath: providedOptions.has("package")
+      ? values.package
+      : positionals[0],
+    packagePathConflict: providedOptions.has("package") && positionals.length > 0,
+    extraPackagePaths: positionals.length > 1,
     channel: values.channel,
     engine: values.engine,
     name: values.name,
     locale: values.locale,
+    runtime: values.runtime,
+    port: values.port,
     yes: values.yes,
     help: values.help,
+    providedOptions,
   });
   if (command === "doctor") return doctor(values);
   if (command === "init") return init(values, positionals);

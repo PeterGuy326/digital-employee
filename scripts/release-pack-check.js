@@ -16,31 +16,40 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-const PACKAGE_SPECS = [
+export const PACKAGE_SPECS = [
   {
     label: "root",
     manifestPath: "package.json",
     requiredFiles: [
       "package.json",
       "dist/apps/cli/bin.js",
-      "dist/packages/core/index.js",
-      "dist/packages/core/index.d.ts",
-      DISTRIBUTION_MANIFEST_PATH,
-      "dist/examples/recipes/minimal-answer.v1/minimal-answer/employee.json",
+      "dist/apps/cli/deploy/channels.js",
+      "dist/apps/cli/deploy/config.js",
+      "dist/apps/cli/deploy/dingtalk-provider.js",
+      "dist/apps/cli/deploy/dws-supervisor.js",
+      "dist/apps/cli/deploy/engines.js",
+      "dist/apps/cli/deploy/http-runtime.js",
+      "dist/apps/cli/deploy/i18n.js",
+      "dist/apps/cli/deploy/index.js",
+      "dist/apps/cli/deploy/prompts.js",
       "dist/examples/recipes/minimal-answer.v1/minimal-answer/SKILL.md",
+      "dist/examples/recipes/minimal-answer.v1/minimal-answer/employee.json",
       "dist/examples/recipes/minimal-answer.v1/minimal-answer/evals/cases.json",
       "dist/examples/recipes/minimal-answer.v1/minimal-answer/knowledge/README.md",
       "dist/examples/recipes/minimal-answer.v1/minimal-answer/schemas/input.schema.json",
       "dist/examples/recipes/minimal-answer.v1/minimal-answer/schemas/output.schema.json",
-      "dist/examples/recipes/structured-action.v1/structured-action/employee.json",
       "dist/examples/recipes/structured-action.v1/structured-action/SKILL.md",
+      "dist/examples/recipes/structured-action.v1/structured-action/employee.json",
       "dist/examples/recipes/structured-action.v1/structured-action/evals/cases.json",
       "dist/examples/recipes/structured-action.v1/structured-action/knowledge/README.md",
       "dist/examples/recipes/structured-action.v1/structured-action/schemas/input.schema.json",
       "dist/examples/recipes/structured-action.v1/structured-action/schemas/output.schema.json",
       "dist/locales/en.json",
       "dist/locales/ja.json",
-      "dist/locales/zh-CN.json"
+      "dist/locales/zh-CN.json",
+      "dist/packages/core/index.js",
+      "dist/packages/core/index.d.ts",
+      DISTRIBUTION_MANIFEST_PATH
     ],
     allowedFiles: ["package.json", "LICENSE", "NOTICE"],
     allowedPrefixes: ["dist/"],
@@ -49,8 +58,15 @@ const PACKAGE_SPECS = [
   {
     label: "core",
     manifestPath: "packages/core/package.json",
-    requiredFiles: ["package.json", "dist/index.js", "dist/index.d.ts"],
-    allowedFiles: ["package.json"],
+    requiredFiles: [
+      "package.json",
+      "README.md",
+      "LICENSE",
+      "NOTICE",
+      "dist/index.js",
+      "dist/index.d.ts"
+    ],
+    allowedFiles: ["package.json", "README.md", "LICENSE", "NOTICE"],
     allowedPrefixes: ["dist/"],
     allowedPatterns: []
   }
