@@ -35,6 +35,14 @@ All notable changes to this project will be documented in this file.
 
 ### Security
 
+- Adapter qualification kit 1.1.0 now gives every case one awaited, bounded
+  finalizer; teardown that cannot settle aborts the suite without emitting a
+  record. Typed filesystem/network/MCP denial codes replace generic failure evidence,
+  sentinel scans fail closed on accessors, Proxies, descriptor errors, and
+  budget exhaustion, and process cleanup is bound to the exact Adapter,
+  config/probe/version fingerprint, and verified child-to-grandchild lineage.
+  The v1 record validator retains the original 1.0.0 nine-case contract while
+  deriving all domain counts and axes exactly for both supported kit versions.
 - Employee-package inspection and the generic run/eval boundaries now reject
   asynchronous JSON Schemas. Claude, Qwen, and CodeBuddy also prepare one
   immutable Schema snapshot per run, reject `$async` before Host execution,
@@ -49,7 +57,6 @@ All notable changes to this project will be documented in this file.
   version probe; invalid, oversized, or asynchronous Schemas therefore cannot
   reach a paid model invocation. Invalid, oversized, or asynchronous Schema and
   unsafe terminal output produce typed failures.
-
 - Qoder assistant text is now buffered until successful process and cleanup
   completion, then scrubbed as one value with the exact service credential.
   This prevents secrets split across native stream chunks from escaping in
