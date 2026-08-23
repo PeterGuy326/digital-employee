@@ -15,8 +15,13 @@
 import path from "node:path"
 
 import type { EmployeePackageManifest } from "../../../packages/core/src/employee-package.js"
+import {
+  WORKSPACE_ORG_SCHEMA_ID,
+  WORKSPACE_ORG_SCHEMA_VERSION,
+} from "../org/budget.js"
+import type { PositionBudget } from "../org/budget.js"
 
-export const WORKSPACE_ORG_SCHEMA_VERSION = "workspace-org.v1" as const
+export { WORKSPACE_ORG_SCHEMA_VERSION }
 export const WORKSPACE_MANIFEST_SCHEMA_VERSION = "workspace.v1alpha1" as const
 
 export const WORKSPACE_TEMPLATE_IDS = ["oss-maintainer"] as const
@@ -32,6 +37,12 @@ export interface WorkspaceTemplateRole {
   toolAllow: string[]
   toolDeny: string[]
   metadata: Record<string, string>
+  /**
+   * Mandatory budget declaration (#157 REQ-006): every hired position
+   * corresponds to exactly one fully allocated budget. Units are tokens and
+   * iteration counts only; there is no currency dimension (#155 non-goal).
+   */
+  budget: PositionBudget
 }
 
 export interface WorkspaceTemplate {
@@ -47,6 +58,19 @@ export const WORKSPACE_POSITION_PACKAGE_AUTHOR = "your-team" as const
 export const WORKSPACE_POSITION_PACKAGE_LICENSE = "Apache-2.0" as const
 
 const READ_ONLY_TOOL_ALLOW = ["Read", "Grep", "Glob"] as const
+
+/**
+ * oss-maintainer budget declarations (V1 design placeholders, #157 REQ-006).
+ * Units: tokens and iteration counts per task / per day.
+ */
+const REPO_OWNER_BUDGET: PositionBudget = {
+  perTask: { tokens: 40_000, iterations: 12 },
+  perDay: { tokens: 400_000, iterations: 96 },
+}
+const SUBORDINATE_BUDGET: PositionBudget = {
+  perTask: { tokens: 20_000, iterations: 8 },
+  perDay: { tokens: 200_000, iterations: 64 },
+}
 
 /**
  * oss-maintainer: a repo-owner lead with three read-only subordinate
@@ -71,6 +95,7 @@ export const OSS_MAINTAINER_TEMPLATE: WorkspaceTemplate = {
       toolAllow: [...READ_ONLY_TOOL_ALLOW],
       toolDeny: [],
       metadata: {},
+      budget: REPO_OWNER_BUDGET,
     },
     {
       id: "issue-researcher",
@@ -83,6 +108,7 @@ export const OSS_MAINTAINER_TEMPLATE: WorkspaceTemplate = {
       toolAllow: [...READ_ONLY_TOOL_ALLOW],
       toolDeny: [],
       metadata: {},
+      budget: SUBORDINATE_BUDGET,
     },
     {
       id: "release-engineer",
@@ -95,6 +121,7 @@ export const OSS_MAINTAINER_TEMPLATE: WorkspaceTemplate = {
       toolAllow: [...READ_ONLY_TOOL_ALLOW],
       toolDeny: [],
       metadata: {},
+      budget: SUBORDINATE_BUDGET,
     },
     {
       id: "community-operator",
@@ -107,6 +134,7 @@ export const OSS_MAINTAINER_TEMPLATE: WorkspaceTemplate = {
       toolAllow: [...READ_ONLY_TOOL_ALLOW],
       toolDeny: [],
       metadata: {},
+      budget: SUBORDINATE_BUDGET,
     },
   ],
 }
@@ -131,8 +159,36 @@ export interface WorkspaceFile {
   content: Uint8Array
 }
 
-function positionPortablePath(roleId: string, relative: string): string {
-  return `./positions/${roleId}/${relative}`
+/**
+ * Directory segments (ancestors first) of a role's position directory under
+ * `positions/`. The parent-child directory relation is the reporting
+ * relationship (#157 REQ-004): a role reporting to another role nests inside
+ * its superior's directory.
+ */
+export function workspaceRoleDirectorySegments(
+  template: WorkspaceTemplate,
+  roleId: string,
+): string[] {
+  const segments: string[] = []
+  let current: string | null = roleId
+  const seen = new Set<string>()
+  while (current !== null) {
+    if (seen.has(current)) {
+      throw new TypeError("workspace_template_reporting_cycle")
+    }
+    seen.add(current)
+    segments.unshift(current)
+    const role = template.roles.find((entry) => entry.id === current)
+    if (!role) {
+      throw new TypeError(`workspace_template_unknown_report_to:${current}`)
+    }
+    current = role.reportTo
+  }
+  return segments
+}
+
+function positionPortablePath(segments: string[], relative: string): string {
+  return `./positions/${segments.join("/")}/${relative}`
 }
 
 function jsonFile(value: unknown): Uint8Array {
@@ -280,36 +336,48 @@ reviewed knowledge for the position before running \`eval\`.
 
 /**
  * Render the employee package file set for one position. The package follows
- * the same contract as the built-in recipes so existing `validate` accepts it.
+ * the same contract as the built-in recipes so existing `validate` accepts
+ * it, and carries a `budget.json` declaration that `org apply` reads as the
+ * position's budget source (#157 REQ-006). The directory path encodes the
+ * reporting line (#157 REQ-004).
  */
 export function renderPositionPackageFiles(
+  template: WorkspaceTemplate,
   role: WorkspaceTemplateRole,
 ): WorkspaceFile[] {
   const manifest = manifestForRole(role)
+  const segments = workspaceRoleDirectorySegments(template, role.id)
   return [
     {
-      portablePath: positionPortablePath(role.id, "employee.json"),
+      portablePath: positionPortablePath(segments, "employee.json"),
       content: jsonFile(manifest),
     },
     {
-      portablePath: positionPortablePath(role.id, "SKILL.md"),
+      portablePath: positionPortablePath(segments, "SKILL.md"),
       content: Buffer.from(skillForRole(role), "utf8"),
     },
     {
-      portablePath: positionPortablePath(role.id, "schemas/input.schema.json"),
+      portablePath: positionPortablePath(segments, "schemas/input.schema.json"),
       content: jsonFile(INPUT_SCHEMA),
     },
     {
-      portablePath: positionPortablePath(role.id, "schemas/output.schema.json"),
+      portablePath: positionPortablePath(segments, "schemas/output.schema.json"),
       content: jsonFile(OUTPUT_SCHEMA),
     },
     {
-      portablePath: positionPortablePath(role.id, "knowledge/README.md"),
+      portablePath: positionPortablePath(segments, "knowledge/README.md"),
       content: Buffer.from(KNOWLEDGE_README, "utf8"),
     },
     {
-      portablePath: positionPortablePath(role.id, "evals/cases.json"),
+      portablePath: positionPortablePath(segments, "evals/cases.json"),
       content: jsonFile(EVAL_CASES),
+    },
+    {
+      portablePath: positionPortablePath(segments, "budget.json"),
+      content: jsonFile({
+        perTask: { ...role.budget.perTask },
+        perDay: { ...role.budget.perDay },
+      }),
     },
   ]
 }
@@ -352,6 +420,7 @@ export interface RenderedOrganization {
     toolAllow: string[]
     toolDeny: string[]
     metadata: Record<string, string>
+    budget: PositionBudget
   }>
   updatedAt: string
 }
@@ -371,8 +440,7 @@ export function renderOrganizationFile(
   updatedAt: string,
 ): WorkspaceFile {
   const organization: RenderedOrganization = {
-    $schema:
-      "https://raw.githubusercontent.com/fullstack-ai-infra/digital-employee/main/configs/workspace-org.schema.json",
+    $schema: WORKSPACE_ORG_SCHEMA_ID,
     schemaVersion: WORKSPACE_ORG_SCHEMA_VERSION,
     business,
     description: template.description,
@@ -386,13 +454,21 @@ export function renderOrganizationFile(
         name: digests[role.id]?.name ?? role.id,
         version: digests[role.id]?.version ?? WORKSPACE_POSITION_PACKAGE_VERSION,
         digest: digests[role.id]?.digest ?? "",
-        localReference: path.join(directory, "positions", role.id),
+        localReference: path.join(
+          directory,
+          "positions",
+          ...workspaceRoleDirectorySegments(template, role.id),
+        ),
       },
       mode: role.mode,
       memoryScope: role.memoryScope,
       toolAllow: [...role.toolAllow],
       toolDeny: [...role.toolDeny],
       metadata: { ...role.metadata },
+      budget: {
+        perTask: { ...role.budget.perTask },
+        perDay: { ...role.budget.perDay },
+      },
     })),
     updatedAt,
   }
@@ -453,7 +529,7 @@ export function renderSkeletonFiles(
 ): WorkspaceFile[] {
   const files: WorkspaceFile[] = [contextSkeleton(business)]
   for (const role of template.roles) {
-    files.push(...renderPositionPackageFiles(role))
+    files.push(...renderPositionPackageFiles(template, role))
   }
   files.push(renderWorkspaceManifest(template, business, createdAt))
   return files
