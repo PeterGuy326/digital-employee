@@ -105,6 +105,7 @@ export type {
 
 export {
   TURN_EVIDENCE_VERSION,
+  NO_ASSEMBLY_DIGEST,
   createInMemoryEvidenceSink,
   digestOutputValue,
   evidenceRecordContainsForbiddenMaterial,
@@ -114,6 +115,7 @@ export type {
   InMemoryEvidenceSink,
   TurnEvidenceApprovalRef,
   TurnEvidenceBudget,
+  TurnEvidencePermissions,
   TurnEvidenceRecord,
   TurnEvidenceTerminal,
 } from "./turn-evidence.js"
@@ -148,3 +150,26 @@ export type {
   ExistingDelegationRef,
   RequestedTaskRecord,
 } from "./delegation.js"
+
+export {
+  ORG_PERMISSIONS_SCHEMA_VERSION,
+  READ_TOOL_ALLOWLIST,
+  createPermissionGate,
+  effectiveMode,
+  evaluateContextAccess,
+  evaluateToolAuthority,
+  normalizeContextPath,
+  permissionsFor,
+  validateOrganizationPermissionsArtifact,
+} from "./org-permissions.js"
+export type {
+  AuthorityScope,
+  OrganizationPermissions,
+  PermissionDecision,
+  PermissionDecisionSummary,
+  PermissionDenialAttempt,
+  PermissionGate,
+  PermissionTier,
+  PositionMode,
+  PositionPermissions,
+} from "./org-permissions.js"
