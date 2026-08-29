@@ -573,6 +573,40 @@ test("Claude deadline and explicit cancellation terminate a hanging run", async 
   )
 })
 
+test("Claude clamps a far-future deadline so setTimeout does not overflow 32 bits", async () => {
+  // Regression: delegation envelope deadlines several years out (e.g.
+  // 2030-01-01) produced remaining-ms > 2**31, triggering
+  // Node TimeoutOverflowWarning and truncating the timer to 1ms.
+  // That fires "deadline" almost immediately and surfaces upstream as
+  // delegation.child_indeterminate. The clamp keeps the delay well under
+  // the 32-bit signed range so a healthy run reaches success.
+  const parent = await mkdtemp(path.join(os.tmpdir(), "claude-deadline-clamp-"))
+  const request = await employeeRequest(parent, "run-deadline-clamp")
+  request.deadline = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toISOString()
+  const originalEmit = process.emitWarning
+  const overflow: string[] = []
+  process.emitWarning = ((warning: unknown, ...rest: unknown[]) => {
+    const message =
+      typeof warning === "string"
+        ? warning
+        : warning instanceof Error
+          ? warning.message
+          : String(warning)
+    if (message.includes("does not fit into a 32-bit signed integer")) {
+      overflow.push(message)
+    }
+    return (originalEmit as (...args: unknown[]) => void).call(process, warning, ...rest)
+  }) as typeof process.emitWarning
+  try {
+    const events = await collect(adapter(parent, "success").run(request))
+    const terminal = events.at(-1)
+    assert.equal(terminal?.type, "run.completed")
+  } finally {
+    process.emitWarning = originalEmit
+  }
+  assert.deepEqual(overflow, [])
+})
+
 test("Claude reserves run ids before staging and cancellation prevents launch", async () => {
   const parent = await mkdtemp(path.join(os.tmpdir(), "claude-reservation-"))
   const launchLog = path.join(parent, "launch.jsonl")
