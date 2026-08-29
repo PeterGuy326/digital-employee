@@ -142,6 +142,16 @@ function timestamp(now: () => Date): string {
   return now().toISOString()
 }
 
+/**
+ * Distinct machine-code returned on the terminal error when a turn is stopped
+ * because the assembled context envelope exceeds `TurnBudget.maxContextBytes`
+ * (token省 v1). The terminal reason remains `turn_budget_exceeded` - this
+ * constant only refines the emitted error code so callers can distinguish
+ * pre-model context-byte stops from post-consumption turn-token stops.
+ */
+export const CONTEXT_BUDGET_EXCEEDED_CODE =
+  "engine.context_budget_exceeded" as const
+
 const REASON_TO_CODE: Readonly<Record<TerminalReason, string>> = {
   goal_met: "engine.goal_met",
   invalid_output_exhausted: "engine.output_invalid",
@@ -602,6 +612,7 @@ export async function* executeTurn(
   const violations: OutputViolation[] = []
   const maxIterations = request.budget.maxIterations
   const maxTokens = request.budget.maxTokens
+  const maxContextBytes = request.budget.maxContextBytes
   const ledger = options.budgetLedger
   const declaration = request.positionBudget
   const usePositionBudget = Boolean(
@@ -702,7 +713,13 @@ export async function* executeTurn(
     message: string,
     cause: EscalationCause,
     snapshot: EscalationBudgetSnapshot,
+    errorCodeOverride?: string,
   ): AsyncGenerator<EngineEvent> {
+    // errorCodeOverride lets a shared TerminalReason surface a distinct,
+    // machine-code errorCode (e.g. `engine.context_budget_exceeded` under
+    // `turn_budget_exceeded`). The stable enumeration is not widened;
+    // only the code string on the terminal error is refined.
+    const surfacedCode = errorCodeOverride ?? REASON_TO_CODE[terminalReason]
     let escalationRef: string | undefined
     try {
       escalationRef = await writeEscalation(cause, snapshot)
@@ -710,7 +727,7 @@ export async function* executeTurn(
         {
           status: "failed",
           reason: terminalReason,
-          errorCode: REASON_TO_CODE[terminalReason],
+          errorCode: surfacedCode,
         },
         null,
         escalationRef,
@@ -724,7 +741,34 @@ export async function* executeTurn(
       )
       return
     }
-    yield fail(REASON_TO_CODE[terminalReason], message, terminalReason)
+    yield fail(surfacedCode, message, terminalReason)
+  }
+
+  // Optional pre-model context envelope byte cap (token省 v1). Omitting
+  // the field preserves the v0.6.0 behavior byte-for-byte. When set, the
+  // engine sums the assembled block byte lengths and fails closed BEFORE
+  // any model consumption, using the shared `turn_budget_exceeded`
+  // terminal reason distinguished by `engine.context_budget_exceeded` on
+  // the error code.
+  if (maxContextBytes !== undefined) {
+    const contextBytes = assembled.blocks.reduce(
+      (sum, block) => sum + block.byteLength,
+      0,
+    )
+    if (contextBytes > maxContextBytes) {
+      yield* stopWithEscalation(
+        "turn_budget_exceeded",
+        "assembled context envelope exceeds maxContextBytes",
+        "turn_budget_exceeded",
+        {
+          dimension: "turn_tokens",
+          used: contextBytes,
+          limit: maxContextBytes,
+        },
+        CONTEXT_BUDGET_EXCEEDED_CODE,
+      )
+      return
+    }
   }
 
   // --- Approval gate (#187, Option 1 terminal-and-resume) ---
