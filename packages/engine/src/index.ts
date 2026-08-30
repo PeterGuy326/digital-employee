@@ -46,14 +46,6 @@ export type {
   ContextWindowLimits,
 } from "./context-assembler.js"
 
-export { filterFreshContext } from "./context-freshness.js"
-export type {
-  ContextEntry,
-  ContextEvictionReason,
-  EvictedContextEntry,
-  FilterFreshContextResult,
-} from "./context-freshness.js"
-
 export { createDeterministicModelPort } from "./model-port.js"
 export type {
   ModelPort,

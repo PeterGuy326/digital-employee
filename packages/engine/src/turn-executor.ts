@@ -40,10 +40,6 @@ import {
   type TerminalReason,
 } from "./contracts.js"
 import { assembleContext } from "./context-assembler.js"
-import {
-  filterFreshContext,
-  type ContextEntry,
-} from "./context-freshness.js"
 import { DoomLoopDetector, type DoomLoopConfig } from "./doom-loop.js"
 import {
   resolveEscalationRouting,
@@ -114,20 +110,6 @@ export interface EngineContextOptions {
   adapterIdentity: string
   maxItems?: number
   maxBytes?: number
-  /**
-   * Optional TTL + digest freshness knobs applied AFTER the pinned port
-   * has returned a validated bundle and BEFORE items feed the assembler.
-   * Purely additive: leaving both empty preserves prior behaviour exactly.
-   *  - defaultTtlMs: fallback lifetime (ms since eventAt) applied to every
-   *    item that lacks a per-item ttl or expiresAt annotation. The wire
-   *    schema is unchanged; per-item ttl arrives once the ContextPort
-   *    schema revs.
-   *  - expectedDigests: caller-known-good sourceDigest keyed by
-   *    artifactId. Items whose bundle digest disagrees are evicted.
-   * Prior art: HTTP Cache-Control max-age + ETag revalidation.
-   */
-  defaultTtlMs?: number
-  expectedDigests?: Readonly<Record<string, string>>
 }
 
 /** Bounded machine identity: leading alnum, then `[A-Za-z0-9._:@-]`, ≤128. */
@@ -502,10 +484,6 @@ export async function* executeTurn(
   // digests only.
   let contextLines: string[] = []
   let contextEvidence: TurnEvidenceContext | undefined
-  // Freshness bookkeeping (v1): counter surfaced through evidence so
-  // downstream telemetry can observe eviction without a new wire event
-  // (see TODO(#TTL-events) in the projection block below).
-  let contextEvictedCount = 0
   if (options.context && options.context.enabled === true) {
     const contextOptions = options.context
     // Bad configuration fails closed before any port call: the adapter
@@ -592,35 +570,19 @@ export async function* executeTurn(
         )
         return
       }
-      // Freshness pass: TTL + digest invalidation applied AFTER the pinned
-      // port's strict envelope validation and BEFORE the assembler consumes
-      // items. Purely additive: when no ttl/digest knobs are set, every
-      // item is fresh and behaviour matches the pre-#TTL baseline.
-      const defaultTtlMs = contextOptions.defaultTtlMs
-      const expectedDigests = contextOptions.expectedDigests ?? {}
-      const projectedEntries: ContextEntry[] = bundle.items.map((item) =>
-        defaultTtlMs !== undefined ? { ...item, ttl: defaultTtlMs } : item,
-      )
-      const { fresh: freshEntries, evicted: evictedEntries } =
-        filterFreshContext(projectedEntries, now(), expectedDigests)
-      // TODO(#TTL-events): once EngineEvent gains a "context.evicted"
-      // variant, yield one event per id in evictedEntries. For v1 we
-      // surface the count through evidence so callers can observe
-      // invalidation without a wire-schema change.
-      contextEvictedCount = evictedEntries.length
-      contextLines = freshEntries.map((item) => item.text)
+      contextLines = bundle.items.map((item) => item.text)
       contextEvidence = {
         mode: contextOptions.mode,
         adapterIdentity: contextOptions.adapterIdentity,
         retrievedAt: bundle.retrievedAt,
         bundleDigest: bundle.bundleDigest,
         watermarkRevision: bundle.completedWatermark.occurrenceRevision,
-        itemCount: freshEntries.length,
-        totalBytes: freshEntries.reduce(
+        itemCount: bundle.items.length,
+        totalBytes: bundle.items.reduce(
           (sum, item) => sum + Buffer.byteLength(item.text, "utf8"),
           0,
         ),
-        items: freshEntries.map((item) => ({
+        items: bundle.items.map((item) => ({
           artifactDigest: item.artifactDigest,
           locator: item.locator,
           kind: item.kind,
@@ -629,10 +591,6 @@ export async function* executeTurn(
           byteLength: Buffer.byteLength(item.text, "utf8"),
         })),
         warnings: bundle.warnings.map((code) => ({ code })),
-        ...(defaultTtlMs !== undefined ||
-        Object.keys(expectedDigests).length > 0
-          ? { evictedCount: contextEvictedCount }
-          : {}),
       }
     }
   }

@@ -136,15 +136,6 @@ export interface TurnEvidenceContext {
   totalBytes: number
   items: TurnEvidenceContextItem[]
   warnings: TurnEvidenceContextWarning[]
-  /**
-   * Count of items evicted by the TTL + digest freshness pass BEFORE the
-   * items reached the assembler. Optional and back-compat: absent when
-   * the caller configures no freshness knobs, present (and possibly 0)
-   * once they opt in via defaultTtlMs or expectedDigests. A dedicated
-   * "context.evicted" EngineEvent is deferred — see TODO in
-   * turn-executor.
-   */
-  evictedCount?: number
 }
 
 export interface TurnEvidenceRecord {
