@@ -123,16 +123,6 @@ export function isTerminalEngineEvent(
 export interface TurnBudget {
   maxIterations: number
   maxTokens?: number
-  /**
-   * Optional pre-model byte cap for the assembled context envelope
-   * (position instructions + spec + turn input + memory recall + workbench
-   * context bundle). When set, the engine sums the byte lengths of the
-   * assembled blocks before any model consumption; exceeding the cap fails
-   * closed as `turn_budget_exceeded` with the dedicated error code
-   * `engine.context_budget_exceeded`. Omitted (default) preserves the
-   * v0.6.0 behavior byte-for-byte.
-   */
-  maxContextBytes?: number
 }
 
 export interface PositionContextInput {
@@ -301,16 +291,6 @@ export function validateTurnRequest(
     throw new EngineRequestError(
       "engine.input_invalid",
       "budget.maxTokens must be a positive integer when present",
-    )
-  }
-  if (
-    request.budget.maxContextBytes !== undefined &&
-    (!Number.isInteger(request.budget.maxContextBytes) ||
-      request.budget.maxContextBytes < 1)
-  ) {
-    throw new EngineRequestError(
-      "engine.input_invalid",
-      "budget.maxContextBytes must be a positive integer when present",
     )
   }
   if (request.deadline !== undefined) {
