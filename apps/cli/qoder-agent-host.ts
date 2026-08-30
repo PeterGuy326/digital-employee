@@ -52,6 +52,7 @@ const QODER_PROTOCOL_MAJOR = 1
 // compatibility version when it enables SDK mode in qodercli 1.1.x.
 const QODER_SDK_TRANSPORT_VERSION = "1.0.16"
 const DEFAULT_TIMEOUT_MS = 240_000
+const MAX_WALL_TIME_MS = 2_073_600_000
 // Some qodercli 1.1.x builds only complete the init handshake after the first
 // user message. If no handshake response arrives within this window the adapter
 // submits the prompt anyway and keeps validating init strictly on arrival.
@@ -946,9 +947,13 @@ export class QoderAgentHostAdapter implements AgentHostAdapter {
       const explicitDeadline = request.deadline
         ? Date.parse(request.deadline) - Date.now()
         : undefined
-      const deadlineMs = Number.isFinite(explicitDeadline)
+      const requestedDeadlineMs = Number.isFinite(explicitDeadline)
         ? Math.max(0, explicitDeadline!)
         : this.timeoutMs
+      // Clamp to keep setTimeout within 32-bit signed range; otherwise Node
+      // emits TimeoutOverflowWarning and truncates the delay to 1ms, causing
+      // an immediate spurious deadline stop (surfaces as delegation.child_indeterminate).
+      const deadlineMs = Math.min(requestedDeadlineMs, MAX_WALL_TIME_MS)
       deadlineTimer = setTimeout(() => stop("deadline"), deadlineMs)
       deadlineTimer.unref()
 
