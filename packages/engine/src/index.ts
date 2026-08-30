@@ -61,7 +61,7 @@ export {
 } from "./output-schema-guard.js"
 export type { PreparedTerminalSchema } from "./output-schema-guard.js"
 
-export { executeTurn } from "./turn-executor.js"
+export { CONTEXT_BUDGET_EXCEEDED_CODE, executeTurn } from "./turn-executor.js"
 export type {
   EngineContextOptions,
   EngineMemoryOptions,
