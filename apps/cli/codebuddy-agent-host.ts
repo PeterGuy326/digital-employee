@@ -49,7 +49,6 @@ const CODEBUDDY_HOST_ID = "codebuddy"
 const CODEBUDDY_DISPLAY_NAME = "CodeBuddy Code"
 const CODEBUDDY_VERSION = "2.106.4"
 const DEFAULT_TIMEOUT_MS = 240_000
-const MAX_WALL_TIME_MS = 2_073_600_000
 const TERMINATION_GRACE_MS = 2_000
 const CLEANUP_ATTEMPTS = 2
 const CLEANUP_ATTEMPT_TIMEOUT_MS = 2_000
@@ -1352,13 +1351,9 @@ export class CodeBuddyAgentHostAdapter implements AgentHostAdapter {
       const explicitDeadline = request.deadline
         ? Date.parse(request.deadline) - Date.now()
         : undefined
-      const requestedDeadlineMs = Number.isFinite(explicitDeadline)
+      const deadlineMs = Number.isFinite(explicitDeadline)
         ? Math.max(0, explicitDeadline!)
         : this.timeoutMs
-      // Clamp to keep setTimeout within 32-bit signed range; otherwise Node
-      // emits TimeoutOverflowWarning and truncates the delay to 1ms, causing
-      // an immediate spurious deadline stop (surfaces as delegation.child_indeterminate).
-      const deadlineMs = Math.min(requestedDeadlineMs, MAX_WALL_TIME_MS)
       deadlineTimer = setTimeout(() => stop("deadline"), deadlineMs)
       deadlineTimer.unref()
 
