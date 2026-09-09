@@ -377,3 +377,57 @@ test("turn run recalls and persists bounded task state from workspace config", a
     await rm(workspace, { recursive: true, force: true })
   }
 })
+
+test("AC-002/AC-003: the same turn names a config pin mismatch, accepts a corrected pin, and reports absent memory", async () => {
+  const workspace = await createWorkspace({ enabled: true })
+  try {
+    await withMemServer(async (baseUrl, seen) => {
+      const run = async (env: NodeJS.ProcessEnv) => {
+        const events: Array<Record<string, any>> = []
+        const diagnostics: string[] = []
+        let modelCalls = 0
+        const result = await runTurn({
+          workspace,
+          positionId: "repo-owner",
+          envelopeText: envelope(workspace),
+          env,
+          model: {
+            async complete() {
+              modelCalls += 1
+              return { text: "configuration acceptance" }
+            },
+          },
+          writeEvent: (line) => events.push(JSON.parse(line)),
+          writeDiagnostic: (line) => diagnostics.push(line),
+        })
+        return { result, events, diagnostics, modelCalls }
+      }
+
+      // Keep the server and compiled code fixed; only operator config changes.
+      const mismatch = await run({
+        ...memoryEnv(baseUrl),
+        MEM_HTTP_PINNED_REVISION: "different-revision",
+      })
+      assert.equal(mismatch.modelCalls, 0)
+      assert.equal(mismatch.events.at(-1)?.type, "run.failed")
+      assert.match(mismatch.events.at(-1)?.error.message, /MEMORY_REVISION_MISMATCH/)
+      assert.equal(seen.some((request) => request.method === "POST"), false)
+
+      const configured = await run(memoryEnv(baseUrl))
+      assert.equal(configured.result.exitCode, 0)
+      assert.equal(configured.modelCalls, 1)
+      assert.equal(configured.events.at(-1)?.type, "run.completed")
+      assert.ok(configured.diagnostics.some((line) => line.includes("adapter mem-http.v1")))
+
+      const beforeDisabled = seen.length
+      await rm(path.join(workspace, "workspace.json"))
+      const absent = await run({})
+      assert.equal(absent.result.exitCode, 0)
+      assert.equal(absent.events.at(-1)?.type, "run.completed")
+      assert.ok(absent.diagnostics.some((line) => line.includes("memory disabled (workspace_manifest_missing)")))
+      assert.equal(seen.length, beforeDisabled)
+    })
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
+  }
+})
