@@ -1,8 +1,7 @@
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
 import { createServer } from "node:http"
-import { chmod, lstat, mkdir, mkdtemp, open, readFile, rename, rm, symlink, writeFile } from "node:fs/promises"
-import type { FileHandle } from "node:fs/promises"
+import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises"
 import { constants as fsConstants } from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -287,21 +286,20 @@ test("reading missing memory configuration never creates a workspace manifest", 
 test("reading memory configuration preserves existing bytes and permissions", async () => {
   const workspace = await createWorkspace({ enabled: false })
   const manifest = path.join(workspace, "workspace.json")
-  let original: FileHandle | undefined
   try {
     await chmod(manifest, 0o644)
     const before = await readFile(manifest, "utf8")
-    original = await open(manifest, "r", 0o600)
-    const mode = (await original.stat()).mode
     const result = await resolveWorkspaceMemory({
       workspace, positionId: "repo-owner", conversationRef: "conversation-1",
       turnId: "turn-1", env: {},
     })
     assert.equal(result.status, "disabled")
     assert.equal(await readFile(manifest, "utf8"), before)
-    assert.equal((await lstat(manifest)).mode, mode)
+    // The fixture mode is known; inspect it only after the read. Windows chmod
+    // supports the owner read/write bits, not Unix group/other permissions.
+    const modeMask = process.platform === "win32" ? 0o600 : 0o777
+    assert.equal((await lstat(manifest)).mode & modeMask, 0o644 & modeMask)
   } finally {
-    await original?.close()
     await rm(workspace, { recursive: true, force: true })
   }
 })
