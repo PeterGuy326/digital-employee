@@ -1,7 +1,8 @@
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
 import { createServer } from "node:http"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises"
+import { constants as fsConstants } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import type { AddressInfo } from "node:net"
@@ -264,6 +265,59 @@ test("workspace memory config is disabled by default and reports why", async () 
       status: "disabled",
       reason: "disabled_by_config",
     })
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
+  }
+})
+
+test("reading missing memory configuration never creates a workspace manifest", async () => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), "turn-memory-read-"))
+  try {
+    assert.deepEqual(await resolveWorkspaceMemory({
+      workspace, positionId: "repo-owner", conversationRef: "conversation-1",
+      turnId: "turn-1", env: {},
+    }), { status: "disabled", reason: "workspace_manifest_missing" })
+    await assert.rejects(lstat(path.join(workspace, "workspace.json")), { code: "ENOENT" })
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
+  }
+})
+
+test("reading memory configuration preserves existing bytes and permissions", async () => {
+  const workspace = await createWorkspace({ enabled: false })
+  const manifest = path.join(workspace, "workspace.json")
+  try {
+    await chmod(manifest, 0o644)
+    const before = await readFile(manifest, "utf8")
+    const mode = (await lstat(manifest)).mode
+    const result = await resolveWorkspaceMemory({
+      workspace, positionId: "repo-owner", conversationRef: "conversation-1",
+      turnId: "turn-1", env: {},
+    })
+    assert.equal(result.status, "disabled")
+    assert.equal(await readFile(manifest, "utf8"), before)
+    assert.equal((await lstat(manifest)).mode, mode)
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
+  }
+})
+
+test("memory configuration keeps no-follow protection where the platform supports it", {
+  skip: !fsConstants.O_NOFOLLOW,
+}, async () => {
+  const workspace = await createWorkspace({ enabled: false })
+  const manifest = path.join(workspace, "workspace.json")
+  const target = path.join(workspace, "original.json")
+  try {
+    await rename(manifest, target)
+    const before = await readFile(target, "utf8")
+    await symlink("original.json", manifest)
+    await assert.rejects(resolveWorkspaceMemory({
+      workspace, positionId: "repo-owner", conversationRef: "conversation-1",
+      turnId: "turn-1", env: {},
+    }), (error: unknown) => error instanceof WorkspaceMemoryConfigError
+      && error.code === "workspace_memory_manifest_unreadable")
+    assert.equal(await readFile(target, "utf8"), before)
   } finally {
     await rm(workspace, { recursive: true, force: true })
   }
