@@ -33,7 +33,8 @@ jobs:
 
   codeql:
     name: CodeQL (${{ matrix.language }})
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    # Fork PRs need this required check too. Keep pull_request (not
+    # pull_request_target); code scanning permits uploads for PR analysis.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
