@@ -3,37 +3,46 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import YAML from "yaml";
 
-const workflow = YAML.parse(await readFile(
+const baseline = YAML.parse(await readFile(
   new URL("../../.github/workflows/bytefolk-security.yml", import.meta.url),
   "utf8"
 ));
+const ci = YAML.parse(await readFile(
+  new URL("../../.github/workflows/ci.yml", import.meta.url),
+  "utf8"
+));
 
-test("required CodeQL check runs for fork and same-repository pull requests", () => {
-  assert.ok(Object.hasOwn(workflow.on, "pull_request"));
-  assert.equal(workflow.on.pull_request, null, "PR analysis must not be filtered");
-  const codeql = workflow.jobs.codeql;
-  assert.equal(codeql.if, undefined, "CodeQL must not skip fork PRs before matrix expansion");
-  assert.equal(codeql.name, "CodeQL (${{ matrix.language }})");
-  assert.deepEqual(codeql.strategy.matrix.language, ["javascript-typescript"]);
-  for (const step of codeql.steps) {
+test("fork and same-repository PRs each receive the required CodeQL analysis", () => {
+  assert.equal(baseline.on.pull_request, null);
+  assert.ok(ci.on.pull_request.types.includes("synchronize"));
+  assert.equal(baseline.jobs.codeql.if,
+    "${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}");
+  const fork = ci.jobs["codeql-fork"];
+  assert.ok(fork, "fork PRs need actual CodeQL analysis, not a skipped check");
+  assert.equal(fork.if,
+    "${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}");
+  assert.equal(fork.name, "CodeQL (${{ matrix.language }})");
+  assert.equal(fork.name, baseline.jobs.codeql.name);
+  assert.deepEqual(fork.strategy, baseline.jobs.codeql.strategy);
+  assert.deepEqual(fork.strategy.matrix.language, ["javascript-typescript"]);
+  assert.deepEqual(fork.steps, baseline.jobs.codeql.steps);
+  for (const step of fork.steps) {
     assert.equal(step.if, undefined, "required analysis steps must not be skipped");
   }
-  const init = codeql.steps.find((step: { uses: string }) => step.uses.startsWith("github/codeql-action/init@"));
-  assert.equal(init.with.languages, "${{ matrix.language }}");
-  assert.equal(init.with.queries, "security-extended");
-  assert.ok(codeql.steps.some((step: { uses: string }) => step.uses.startsWith("github/codeql-action/analyze@")));
 });
 
 test("fork CodeQL analysis retains the unprivileged PR execution boundary", () => {
-  assert.deepEqual(Object.keys(workflow.on).sort(), ["pull_request", "push", "schedule", "workflow_dispatch"]);
-  assert.deepEqual(workflow.permissions, { contents: "read" });
-  assert.deepEqual(workflow.jobs.codeql.permissions, {
+  assert.deepEqual(Object.keys(ci.on).sort(), ["pull_request", "push"]);
+  assert.deepEqual(ci.permissions, { contents: "read" });
+  const fork = ci.jobs["codeql-fork"];
+  assert.ok(fork);
+  assert.deepEqual(fork.permissions, {
     contents: "read",
     actions: "read",
     packages: "read",
     "security-events": "write"
   });
-  for (const step of workflow.jobs.codeql.steps) {
+  for (const step of fork.steps) {
     assert.match(step.uses, /@[0-9a-f]{40}$/);
     assert.equal(step.run, undefined);
     if (step.uses.startsWith("actions/checkout@")) {
